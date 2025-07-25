@@ -74,18 +74,21 @@ DIE_HEIGHT = len(DICE_ART[1])
 DIE_WIDTH = len(DICE_ART[1][0])
 DIE_FACE_SEPARATOR = " "
 
+## Roll 2 dice 
 def dice_roll():
-    ## Roll 2 dice 
     return (random.randint(1,6), random.randint(1,6))
 
-## If the two dices are equal add to the total 
+## If the two dices are equal, add to the total 
 def dice_logic(rolled, previous_rolls):
     if rolled[0] == rolled[1]:
         previous_rolls.append(rolled)
-        print(f"Number of doubles {len(previous_rolls)}")
+        return True
 
+    else:
+        previous_rolls.clear()
+        return False
 
-
+## Display the actual value of the dice roll from the DICE_ART 
 def draw_dice(screen, dice_values, x, y):
     for i, value in enumerate(dice_values):
         die_art = DICE_ART[value]
@@ -117,6 +120,9 @@ def is_inside_circle(pos, center, radius):
 running = True
 rolled = None
 
+doubles_rolled = []
+is_double = False
+
 while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -128,8 +134,10 @@ while running:
             ## If the mouse clicks on the button roll the dice
             if is_inside_circle(event.pos, circ_center, circ_rad):
                 rolled = dice_roll()
+                rolled = (1,1)
+                is_doubles = dice_logic(rolled, doubles_rolled)
 
-    # Fill the background with white
+    ## Fill the background with white
     screen.fill((255, 255, 255))
 
     ## Make a button 
@@ -137,28 +145,20 @@ while running:
     button_text = value_font.render("ROLL", True, (255, 255, 255))
     text_rect = button_text.get_rect(center=circ_center)
     screen.blit(button_text, text_rect)
-    
+
+    ## Display dice roll and total 
     if rolled:
         draw_dice(screen, rolled, 200, 200)
         draw_total(screen, rolled)
+
+        if is_doubles:
+            doubles_text = value_font.render("You rolled doubles!", True, (0, 0, 0))
+            screen.blit(doubles_text, (screen_width//2 - doubles_text.get_width()//2, 50))
+
+        if len(doubles_rolled) >= 3:
+            jail_text = value_font.render("Too Many Doubles Rolled, Go To Jail", True, (255, 0, 0))
+            screen.blit(jail_text, (screen_width//2 - jail_text.get_width()//2, 150))
     
     pygame.display.flip()
 
 pygame.quit()
-
-
-
-
-# def main():
-#     last_rolls = []
-    
-#     for i in range(3):
-#         rolled = dice_roll()
-#         print(rolled)
-#         dice_displayed = generate_dice_faces_diagram(rolled)
-#         print(f"{dice_displayed}\n")        
-#         dice_logic(rolled, last_rolls)
-
-
-# if __name__ == "__main__":
-#     main()
