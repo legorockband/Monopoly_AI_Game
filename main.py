@@ -1,14 +1,16 @@
-import dice
-import board_test
+# import dice
+# import board_test
+import dice_board
 import game_test
 
 
 def main():
-    # You can now safely call their functions here
-    board_test.create_board()  # Draw board (comment this out if not needed every run)
+    
+    player1 = game_test.Player
+    player2 = game_test.Player
 
-    game = game_test.Game(player_names=["Player 1", "Player 2"])
-    game.start_game()
+    # game = game_test.Game(player_names=["Player 1", "Player 2"])
+    # game.start_game()
 
 if __name__ == "__main__":
     main()

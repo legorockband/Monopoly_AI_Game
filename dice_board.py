@@ -117,6 +117,9 @@ circ_center = (1200, 400)
 circ_rad = 50
 circ_color = (255, 0, 0)
 
+## Global Var to know how much to move
+total_roll = None
+
 def running_display():
     running = True
     rolled = None
@@ -166,3 +169,4 @@ def running_display():
 
 if __name__ == "__main__":
     running_display()
+    print(total_roll)

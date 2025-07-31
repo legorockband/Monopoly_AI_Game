@@ -1,12 +1,21 @@
 #board.py
 # reference link : https://www.pygame.org/docs/
 import pygame
+import ctypes
+import os
 import sys
 
 # pygame setup
 pygame.init()
-screen = pygame.display.set_mode((1400,850))
+screen = pygame.display.set_mode((0, 0), pygame.RESIZABLE)
+
+# Maximize the window (Windows only)
+if os.name == 'nt':
+    hwnd = pygame.display.get_wm_info()['window']
+    ctypes.windll.user32.ShowWindow(hwnd, 3)  # 3 = SW_MAXIMIZE
 clock = pygame.time.Clock()
+
+pygame.display.flip()
 
 pygame.display.set_caption("Monopoly")
 font = pygame.font.SysFont(None, 16)
@@ -26,93 +35,97 @@ spaces_names = [
 
 # shorter for the boxes for now
 spaces_names_2 = [
-    "GO", "MA", "CC", "BA",       
-    "Tax", "RR", "OA", "Ch", 
-    "VA", "CA", "Just Visiting", "SCP",    
-    "EC", "SA", "VA", "PRR", 
-    "SJP", "CC", "TA", "NYA", 
-    "Free Parking", "KA", "Ch", "IA", "ILA",  
-    "B&O", "AA", "VA", "WC", 
-    "MG", "Go To Jail", "PA", "NCA", "CC", 
-    "PAA", "SL", "Ch", "PP", "LT", 
-    "BW"
+    "MA", "CC", "BA", "Tax", "RR", "OA", "Ch", "VA", "CA",      ## Bottom row   (0-8)
+    "SCP", "EC", "SA", "VA", "PRR", "SJP", "CC", "TA", "NYA",   ## Left Row     (9-17)
+    "KA", "Ch", "IA", "ILA", "B&O", "AA", "VA", "WC", "MG",     ## Top Row      (18-26)    
+    "PA", "NCA", "CC", "PAA", "SL", "Ch", "PP", "LT", "BW"      ## Right Row    (27-35)
 ]
 
+corner_names_short = [
+    "GO", "Just Visiting", "Free Parking", "Go To Jail"
+]
 
-def board_game():
+def board_game(screen_width:int, screen_height:int):
     screen.fill((255, 255, 255))
-    space_size = 62
-    corner_size = 122
-    side_space_height = 80
 
-    # text
-    for i in range(9):
-        x = 120 + i * space_size
-        y = 800 - space_size
-        pygame.draw.rect(screen, (0,0,0), (x, y, space_size, space_size), 2)
+    ## Multiple the width by 5/8 because need space for the dice roll and player stats
+    board_size = int(min(screen_height, (5/8) * screen_width))
 
-        name = spaces_names_2[i+1]
-        label = font.render(name, True, (0,0,0))
-        text_rect = label.get_rect(center=(x+space_size // 2, y + space_size // 2))
-        screen.blit(label, text_rect)
+    corner_size = board_size // 7
+    space_size = (board_size - 1.9 * corner_size) // 9
 
-  
+    corner_positions = [
+    (board_size - corner_size, board_size - corner_size),  # GO (bottom-right)
+    (0, board_size - corner_size),                         # Just Visiting (bottom-left)
+    (0, 0),                                                 # Free Parking (top-left)
+    (board_size - corner_size, 0)                          # Go To Jail (top-right)
+    ]
 
-    #bottom right
-    pygame.draw.rect(screen, (0, 0, 0), (800 - corner_size, 800 - corner_size, corner_size, corner_size), 2)
+    for name, (x, y) in zip(corner_names_short, corner_positions):
+        label = font.render(name, True, (0, 0, 0))
+        label_rect = label.get_rect(center=(x + corner_size // 2, y + corner_size // 2))
+        screen.blit(label, label_rect)
 
-    #bottom left
-    pygame.draw.rect(screen, (0, 0, 0), (0, 800 - corner_size, corner_size, corner_size), 2)
+    # Bottom-right corner (GO)
+    pygame.draw.rect(screen, (0, 0, 0), (corner_positions[0][0], corner_positions[0][1], corner_size, corner_size), 2) 
 
-    #top left
-    pygame.draw.rect(screen, (0, 0, 0), (0, 0, corner_size, corner_size), 2)
+    # Bottom-left corner (Jail)
+    pygame.draw.rect(screen, (0, 0, 0), (corner_positions[1][0], corner_positions[1][1], corner_size, corner_size), 2) 
+    
+    # Top-left corner (Free Parking)
+    pygame.draw.rect(screen, (0, 0, 0), (corner_positions[2][0], corner_positions[2][1], corner_size, corner_size), 2)
 
-    #top right
-    pygame.draw.rect(screen, (0, 0, 0), (800 - corner_size, 0, corner_size, corner_size), 2)
+    # Top-right corner (Go to Jail)
+    pygame.draw.rect(screen, (0, 0, 0), (corner_positions[3][0], corner_positions[3][1], corner_size, corner_size), 2)
 
     # Bottom row : pygame.draw.rect(left, top, width, height) -> Rectangle
+    ## Created Left to right
     for i in range(9):
-        idx = i + 1
-        x = 120 + i * space_size
-        y = 800 - space_size
-        pygame.draw.rect(screen, (0,0,0), (x, y, space_size, space_size), 2)
-        go_label = font.render(spaces_names_2[0], True, (0,0,0))
-        go_rect = go_label.get_rect(center=(800-corner_size // 2, 800 - corner_size // 2))
-        screen.blit(go_label, go_rect)
+        idx = i
 
-    for i, pos in zip([10, 20, 30], [(corner_size // 2, 800 - corner_size // 2), (corner_size // 2, corner_size // 2), (800 - corner_size // 2, corner_size // 2)]):
-        label = font.render(spaces_names_2[i], True, (0, 0, 0))
-        rect = label.get_rect(center=pos)
+        ## Starting position is after the bottom left corner 
+        x = corner_size + (i) * space_size
+        y = board_size - corner_size
+
+        pygame.draw.rect(screen, (0,0,0), (x, y, space_size, corner_size), 2)
+
+        ## Label All the Properties starting after Go and ending before Just Visting
+        label = font.render(spaces_names_2[idx], True, (0, 0, 0))
+        rect = label.get_rect(center=(x + space_size // 2, y + 40 + space_size // 2))
+        screen.blit(label, rect)
+
+    # Left row:
+    ## Bottom to top 
+    for i in range(9):
+        idx = 9 + i
+        x = 0
+        y = board_size - corner_size - (i + 1) * space_size
+        pygame.draw.rect(screen, (0,0,0), (x, y, corner_size, space_size), 2)
+        label = font.render(spaces_names_2[idx], True, (0, 0, 0))
+        rect = label.get_rect(center=(x + space_size // 2, y + space_size // 2))
         screen.blit(label, rect)
 
     # Top Row:
+    ## Created Left to right
     for i in range(9):
-        idx = 19 + (8-i)
+        idx = 18 + i
         x = corner_size + i * space_size
         y = 0
-        pygame.draw.rect(screen, (0,0,0), (x, y, space_size, space_size), 2)
+        pygame.draw.rect(screen, (0,0,0), (x, y, space_size, corner_size), 2)
         label = font.render(spaces_names_2[idx], True, (0, 0, 0))
         rect = label.get_rect(center=(x + space_size // 2, y + space_size // 2))
         screen.blit(label, rect)
 
-    # left row:
-    for i in range(9):
-        idx = 10 + i
-        x = 0
-        y = corner_size + i * space_size
-        pygame.draw.rect(screen, (0,0,0), (x, y, side_space_height, space_size), 2)
-        label = font.render(spaces_names_2[idx], True, (0, 0, 0))
-        rect = label.get_rect(center=(x + space_size // 2, y + space_size // 2))
-        screen.blit(label, rect)
 
     # right row:
+    ## Top to Bottom
     for i in range(9):
-        idx = 28 + i
-        x = 800 - space_size
+        idx = 27 + i
+        x = board_size - corner_size
         y = corner_size + i * space_size
-        pygame.draw.rect(screen, (0,0,0), (x, y, side_space_height, space_size,), 2)
+        pygame.draw.rect(screen, (0,0,0), (x, y, corner_size, space_size,), 2)
         label = font.render(spaces_names_2[idx], True, (0, 0, 0))
-        rect = label.get_rect(center=(x + space_size // 2, y + space_size // 2))
+        rect = label.get_rect(center=(x + 40 + space_size // 2, y + space_size // 2))
         screen.blit(label, rect)
 
 def create_board():
@@ -122,7 +135,10 @@ def create_board():
             if event.type == pygame.QUIT:
                 running = False
 
-        board_game()
+        ## Get the screen width and height for proper space creation
+        screen_width, screen_height = pygame.display.get_surface().get_size()
+
+        board_game(screen_width, screen_height)
         pygame.display.flip()
         clock.tick(60)
 
