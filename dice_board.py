@@ -8,7 +8,9 @@ import pygame
 import ctypes
 
 pygame.init()
-screen = pygame.display.set_mode((800, 600), pygame.RESIZABLE)
+screen = pygame.display.set_mode((0, 0), pygame.RESIZABLE)
+
+screen_width, screen_height = pygame.display.get_surface().get_size()
 
 # Maximize the window (Windows only)
 if os.name == 'nt':
@@ -127,6 +129,8 @@ def running_display():
     doubles_rolled = []
     is_double = False
 
+    player_pos = 0  ## Starts at "GO"
+
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -138,14 +142,20 @@ def running_display():
                 if dice.is_inside_circle(mouse_pos, circ_center, circ_rad):
                     rolled = dice.dice_roll()
                     is_doubles = dice.dice_logic(rolled, doubles_rolled)
+                    roll_total = sum(rolled)
+                    player_pos = (player_pos + roll_total) % 40     ## Added so it can only be 0 - 40
 
-        board_test.board_game()
+        ## Properties of the board
+        board_size = int(min(screen_height, (5/8) * screen_width))
+        corner_size = board_size // 7
+        space_size = (board_size - 1.9 * corner_size) // 9
+
+        board_test.board_game(screen_width, screen_height, board_size, corner_size, space_size)
 
         ## Make a button 
-        pygame.draw.circle(screen, circ_color, circ_center, circ_rad)
-        button_text = value_font.render("ROLL", True, (255, 255, 255))
-        text_rect = button_text.get_rect(center=circ_center)
-        screen.blit(button_text, text_rect)
+        dice.make_dice_button(screen, circ_color, circ_center, circ_rad)
+
+        board_test.move_player(screen, player_pos, board_size, corner_size, space_size)
 
         ## Display dice roll and total 
         if rolled:
@@ -158,7 +168,7 @@ def running_display():
 
             if len(doubles_rolled) >= 3:
                 jail_text = value_font.render("Too Many Doubles Rolled, Go To Jail", True, (255, 0, 0))
-                screen.blit(jail_text, (1200 - jail_text.get_width()//2, 150))
+                screen.blit(jail_text, (1200 - jail_text.get_width()//2, 100))
         
 
         pygame.display.flip()

@@ -34,25 +34,26 @@ spaces_names = [
 ]
 
 # shorter for the boxes for now
+## (<Name>, <Cost for Property>, <Color of Property: (R, G, B)>)
 spaces_names_2 = [
-    "MA", "CC", "BA", "Tax", "RR", "OA", "Ch", "VA", "CA",      ## Bottom row   (0-8)
-    "SCP", "EC", "SA", "VA", "PRR", "SJP", "CC", "TA", "NYA",   ## Left Row     (9-17)
-    "KA", "Ch", "IA", "ILA", "B&O", "AA", "VA", "WC", "MG",     ## Top Row      (18-26)    
-    "PA", "NCA", "CC", "PAA", "SL", "Ch", "PP", "LT", "BW"      ## Right Row    (27-35)
+    ("MA", "$60", (150, 75, 0)), ("CC", None, None), ("BA", "$60", (150, 75, 0)), ("Tax", "Pay $200", None), ("RR", "$200", None), ("OA", "$100", (173, 216, 230)), ("Ch", None, None), ("VA", "$100", (173, 216, 230)), ("CA", "$120", (173, 216, 230)),     # Bottom row (0–8)
+    ("SCP", "$140", (255, 0, 255)), ("EC", "$150", None), ("SA", "$140", (255, 0, 255)), ("VA", "$160", (255, 0, 255)), ("PRR", "$200", None), ("SJP", "$180", (255, 165, 0)), ("CC", None, None), ("TA", "$180", (255, 165, 0)), ("NYA", "$200", (255, 165, 0)),  # Left row (9–17)
+    ("KA", "$220", (255, 0, 0)), ("Ch", None, None), ("IA", "$220", (255, 0, 0)), ("ILA", "$240", (255, 0, 0)), ("B&O", "$200", None), ("AA", "$260", (255, 255, 0)), ("VA", "$260", (255, 255, 0)), ("WW", "$150", None), ("MG", "$280", (255, 255, 0)),   # Top row (18–26)
+    ("PA", "$300", (0, 255, 0)), ("NCA", "$300", (0, 255, 0)), ("CC", None, None), ("PAA", "$320", (0, 255, 0)), ("SL", "$200", None), ("Ch", None, None), ("PP", "$350", (0, 0, 139)), ("LT", "Pay $100", None), ("BW", "$400", (0, 0, 139))     # Right row (27–35)
 ]
 
 corner_names_short = [
     "GO", "Just Visiting", "Free Parking", "Go To Jail"
 ]
 
-def board_game(screen_width:int, screen_height:int):
+def board_game(screen_width:int, screen_height:int, board_size:int, corner_size:int, space_size:int):
     screen.fill((255, 255, 255))
 
-    ## Multiple the width by 5/8 because need space for the dice roll and player stats
-    board_size = int(min(screen_height, (5/8) * screen_width))
+    # ## Multiple the width by 5/8 because spaced needed for the dice roll and player stats
+    # board_size = int(min(screen_height, (5/8) * screen_width))
 
-    corner_size = board_size // 7
-    space_size = (board_size - 1.9 * corner_size) // 9
+    # corner_size = board_size // 7
+    # space_size = (board_size - 1.9 * corner_size) // 9
 
     corner_positions = [
     (board_size - corner_size, board_size - corner_size),  # GO (bottom-right)
@@ -61,6 +62,7 @@ def board_game(screen_width:int, screen_height:int):
     (board_size - corner_size, 0)                          # Go To Jail (top-right)
     ]
 
+    ## Display the corner text
     for name, (x, y) in zip(corner_names_short, corner_positions):
         label = font.render(name, True, (0, 0, 0))
         label_rect = label.get_rect(center=(x + corner_size // 2, y + corner_size // 2))
@@ -89,9 +91,20 @@ def board_game(screen_width:int, screen_height:int):
 
         pygame.draw.rect(screen, (0,0,0), (x, y, space_size, corner_size), 2)
 
+        color_value = spaces_names_2[idx][2]
+
+        if color_value != None: 
+            pygame.draw.rect(screen, color_value, (x, y, space_size, corner_size // 6))  ## Color square
+            pygame.draw.rect(screen, (0, 0, 0), (x, y, space_size, corner_size // 6), 2) ## Border for the color square 
+
         ## Label All the Properties starting after Go and ending before Just Visting
-        label = font.render(spaces_names_2[idx], True, (0, 0, 0))
+        label = font.render(spaces_names_2[idx][0], True, (0, 0, 0))
         rect = label.get_rect(center=(x + space_size // 2, y + 40 + space_size // 2))
+        screen.blit(label, rect)
+
+        ## Label for the cost of the property
+        label = font.render(spaces_names_2[idx][1], True, (0, 0, 0))
+        rect = label.get_rect(center=(x + space_size // 2, y + 60 + space_size // 2))
         screen.blit(label, rect)
 
     # Left row:
@@ -101,8 +114,19 @@ def board_game(screen_width:int, screen_height:int):
         x = 0
         y = board_size - corner_size - (i + 1) * space_size
         pygame.draw.rect(screen, (0,0,0), (x, y, corner_size, space_size), 2)
-        label = font.render(spaces_names_2[idx], True, (0, 0, 0))
-        rect = label.get_rect(center=(x + space_size // 2, y + space_size // 2))
+
+        color_value = spaces_names_2[idx][2]
+
+        if color_value != None: 
+            pygame.draw.rect(screen, color_value, (x + corner_size - corner_size // 6, y, corner_size // 6, space_size))  ## Color square
+            pygame.draw.rect(screen, (0, 0, 0), (x + corner_size - corner_size // 6, y, corner_size // 6, space_size), 2) ## Border for the color square 
+
+        label = font.render(spaces_names_2[idx][0], True, (0, 0, 0))
+        rect = label.get_rect(center=(x + 30 + space_size // 2, y + space_size // 2))
+        screen.blit(label, rect)
+
+        label = font.render(spaces_names_2[idx][1], True, (0, 0, 0))
+        rect = label.get_rect(center=(x  - 15 + space_size // 2, y + space_size // 2))
         screen.blit(label, rect)
 
     # Top Row:
@@ -112,10 +136,20 @@ def board_game(screen_width:int, screen_height:int):
         x = corner_size + i * space_size
         y = 0
         pygame.draw.rect(screen, (0,0,0), (x, y, space_size, corner_size), 2)
-        label = font.render(spaces_names_2[idx], True, (0, 0, 0))
-        rect = label.get_rect(center=(x + space_size // 2, y + space_size // 2))
+
+        color_value = spaces_names_2[idx][2]
+
+        if color_value != None: 
+            pygame.draw.rect(screen, color_value, (x, y + corner_size - corner_size // 6, space_size, corner_size // 6))  ## Color square
+            pygame.draw.rect(screen, (0, 0, 0), (x, y + corner_size - corner_size // 6, space_size, corner_size // 6), 2) ## Border for the color square 
+
+        label = font.render(spaces_names_2[idx][0], True, (0, 0, 0))
+        rect = label.get_rect(center=(x + space_size // 2, y + 15 + space_size // 2))
         screen.blit(label, rect)
 
+        label = font.render(spaces_names_2[idx][1], True, (0, 0, 0))
+        rect = label.get_rect(center=(x + space_size // 2, y - 15 + space_size // 2))
+        screen.blit(label, rect)
 
     # right row:
     ## Top to Bottom
@@ -124,9 +158,66 @@ def board_game(screen_width:int, screen_height:int):
         x = board_size - corner_size
         y = corner_size + i * space_size
         pygame.draw.rect(screen, (0,0,0), (x, y, corner_size, space_size,), 2)
-        label = font.render(spaces_names_2[idx], True, (0, 0, 0))
-        rect = label.get_rect(center=(x + 40 + space_size // 2, y + space_size // 2))
+
+        color_value = spaces_names_2[idx][2]
+
+        if color_value != None: 
+            pygame.draw.rect(screen, color_value, (x, y, corner_size // 6, space_size))  ## Color square
+            pygame.draw.rect(screen, (0, 0, 0), (x, y, corner_size // 6, space_size), 2) ## Border for the color square 
+
+        label = font.render(spaces_names_2[idx][0], True, (0, 0, 0))
+        rect = label.get_rect(center=(x + 30 + space_size // 2, y + space_size // 2))
         screen.blit(label, rect)
+
+        label = font.render(spaces_names_2[idx][1], True, (0, 0, 0))
+        rect = label.get_rect(center=(x + 60 + space_size // 2, y + space_size // 2))
+        screen.blit(label, rect)
+
+def getPlayerPos(pos:int, board_size:int, corner_size:int, space_size:int):
+    if pos == 0:            # GO
+        x = board_size - corner_size
+        y = board_size - corner_size
+
+    elif 1 <= pos <= 9:     # Bottom row (Right to Left)
+        x = board_size - corner_size - pos * space_size
+        y = board_size - corner_size
+    
+
+    elif pos == 10:         # Just Visiting
+        x = 0
+        y = board_size - corner_size
+
+    elif 11 <= pos <= 19:   # Left column (Bottom to Top)
+        x = 0
+        y = board_size - corner_size - (pos - 10) * space_size
+
+    elif pos == 20:         # Free Parking
+        x = 0
+        y = 0
+
+
+    elif 21 <= pos <= 29:   # Top row (Left to Right)
+        x = corner_size + (pos - 21) * space_size
+        y = 0
+
+
+    elif pos == 30:         # Go To Jail
+        x = board_size - corner_size
+        y = 0
+
+    elif 31 <= pos <= 39:   # Right column (Top to Bottom)
+        x = board_size - corner_size
+        y = corner_size + (pos - 31) * space_size   
+
+    else:
+        raise ValueError("Invalid Position on Board")
+        
+
+    return (x + 10, y + 10)  # slight offset for visual padding
+
+def move_player(screen, current_pos:int, board_size:int, corner_size:int, space_size:int):
+    x, y = getPlayerPos(current_pos, board_size, corner_size, space_size)
+    pygame.draw.rect(screen, (0, 255, 0), (x, y, 25, 25))
 
 def create_board():
     running = True
@@ -138,7 +229,12 @@ def create_board():
         ## Get the screen width and height for proper space creation
         screen_width, screen_height = pygame.display.get_surface().get_size()
 
-        board_game(screen_width, screen_height)
+        ## Properties of the board
+        board_size = int(min(screen_height, (5/8) * screen_width))
+        corner_size = board_size // 7
+        space_size = (board_size - 1.9 * corner_size) // 9
+
+        board_game(screen_width, screen_height, board_size, corner_size, space_size)
         pygame.display.flip()
         clock.tick(60)
 
