@@ -5,21 +5,6 @@ import ctypes
 import os
 import sys
 
-# pygame setup
-pygame.init()
-screen = pygame.display.set_mode((0, 0), pygame.RESIZABLE)
-
-# Maximize the window (Windows only)
-if os.name == 'nt':
-    hwnd = pygame.display.get_wm_info()['window']
-    ctypes.windll.user32.ShowWindow(hwnd, 3)  # 3 = SW_MAXIMIZE
-clock = pygame.time.Clock()
-
-pygame.display.flip()
-
-pygame.display.set_caption("Monopoly")
-font = pygame.font.SysFont(None, 16)
-
 spaces_names = [
     "GO", "MEDITERRANEAN AVENUE", "COMMUNITY CHEST", "BALTIC AVENUE",
     "INCOME TAX", "READING RAILROAD", "ORIENTAL AVENUE", "CHANCE",
@@ -46,14 +31,10 @@ corner_names_short = [
     "GO", "Just Visiting", "Free Parking", "Go To Jail"
 ]
 
-def board_game(screen_width:int, screen_height:int, board_size:int, corner_size:int, space_size:int):
+def board_game(screen, font, board_size:int, corner_size:int, space_size:int):
     screen.fill((255, 255, 255))
 
-    # ## Multiple the width by 5/8 because spaced needed for the dice roll and player stats
-    # board_size = int(min(screen_height, (5/8) * screen_width))
-
-    # corner_size = board_size // 7
-    # space_size = (board_size - 1.9 * corner_size) // 9
+    color_size = corner_size // 4
 
     corner_positions = [
     (board_size - corner_size, board_size - corner_size),  # GO (bottom-right)
@@ -80,8 +61,7 @@ def board_game(screen_width:int, screen_height:int, board_size:int, corner_size:
     # Top-right corner (Go to Jail)
     pygame.draw.rect(screen, (0, 0, 0), (corner_positions[3][0], corner_positions[3][1], corner_size, corner_size), 2)
 
-    # Bottom row : pygame.draw.rect(left, top, width, height) -> Rectangle
-    ## Created Left to right
+    # Bottom row: Created Left to right
     for i in range(9):
         idx = i
 
@@ -94,8 +74,8 @@ def board_game(screen_width:int, screen_height:int, board_size:int, corner_size:
         color_value = spaces_names_2[idx][2]
 
         if color_value != None: 
-            pygame.draw.rect(screen, color_value, (x, y, space_size, corner_size // 6))  ## Color square
-            pygame.draw.rect(screen, (0, 0, 0), (x, y, space_size, corner_size // 6), 2) ## Border for the color square 
+            pygame.draw.rect(screen, color_value, (x, y, space_size, color_size))  ## Color square
+            pygame.draw.rect(screen, (0, 0, 0), (x, y, space_size, color_size), 2) ## Border for the color square 
 
         ## Label All the Properties starting after Go and ending before Just Visting
         label = font.render(spaces_names_2[idx][0], True, (0, 0, 0))
@@ -107,8 +87,7 @@ def board_game(screen_width:int, screen_height:int, board_size:int, corner_size:
         rect = label.get_rect(center=(x + space_size // 2, y + 60 + space_size // 2))
         screen.blit(label, rect)
 
-    # Left row:
-    ## Bottom to top 
+    # Left row: Bottom to top 
     for i in range(9):
         idx = 9 + i
         x = 0
@@ -118,8 +97,8 @@ def board_game(screen_width:int, screen_height:int, board_size:int, corner_size:
         color_value = spaces_names_2[idx][2]
 
         if color_value != None: 
-            pygame.draw.rect(screen, color_value, (x + corner_size - corner_size // 6, y, corner_size // 6, space_size))  ## Color square
-            pygame.draw.rect(screen, (0, 0, 0), (x + corner_size - corner_size // 6, y, corner_size // 6, space_size), 2) ## Border for the color square 
+            pygame.draw.rect(screen, color_value, (x + corner_size - color_size, y, color_size, space_size))  ## Color square
+            pygame.draw.rect(screen, (0, 0, 0), (x + corner_size - color_size, y, color_size, space_size), 2) ## Border for the color square 
 
         label = font.render(spaces_names_2[idx][0], True, (0, 0, 0))
         rect = label.get_rect(center=(x + 30 + space_size // 2, y + space_size // 2))
@@ -129,8 +108,7 @@ def board_game(screen_width:int, screen_height:int, board_size:int, corner_size:
         rect = label.get_rect(center=(x  - 15 + space_size // 2, y + space_size // 2))
         screen.blit(label, rect)
 
-    # Top Row:
-    ## Created Left to right
+    # Top Row: Created Left to right
     for i in range(9):
         idx = 18 + i
         x = corner_size + i * space_size
@@ -140,8 +118,8 @@ def board_game(screen_width:int, screen_height:int, board_size:int, corner_size:
         color_value = spaces_names_2[idx][2]
 
         if color_value != None: 
-            pygame.draw.rect(screen, color_value, (x, y + corner_size - corner_size // 6, space_size, corner_size // 6))  ## Color square
-            pygame.draw.rect(screen, (0, 0, 0), (x, y + corner_size - corner_size // 6, space_size, corner_size // 6), 2) ## Border for the color square 
+            pygame.draw.rect(screen, color_value, (x, y + corner_size - color_size, space_size, color_size))  ## Color square
+            pygame.draw.rect(screen, (0, 0, 0), (x, y + corner_size - color_size, space_size, color_size), 2) ## Border for the color square 
 
         label = font.render(spaces_names_2[idx][0], True, (0, 0, 0))
         rect = label.get_rect(center=(x + space_size // 2, y + 15 + space_size // 2))
@@ -151,8 +129,7 @@ def board_game(screen_width:int, screen_height:int, board_size:int, corner_size:
         rect = label.get_rect(center=(x + space_size // 2, y - 15 + space_size // 2))
         screen.blit(label, rect)
 
-    # right row:
-    ## Top to Bottom
+    # Right row: Top to Bottom
     for i in range(9):
         idx = 27 + i
         x = board_size - corner_size
@@ -162,8 +139,8 @@ def board_game(screen_width:int, screen_height:int, board_size:int, corner_size:
         color_value = spaces_names_2[idx][2]
 
         if color_value != None: 
-            pygame.draw.rect(screen, color_value, (x, y, corner_size // 6, space_size))  ## Color square
-            pygame.draw.rect(screen, (0, 0, 0), (x, y, corner_size // 6, space_size), 2) ## Border for the color square 
+            pygame.draw.rect(screen, color_value, (x, y, color_size, space_size))  ## Color square
+            pygame.draw.rect(screen, (0, 0, 0), (x, y, color_size, space_size), 2) ## Border for the color square 
 
         label = font.render(spaces_names_2[idx][0], True, (0, 0, 0))
         rect = label.get_rect(center=(x + 30 + space_size // 2, y + space_size // 2))
@@ -182,7 +159,6 @@ def getPlayerPos(pos:int, board_size:int, corner_size:int, space_size:int):
         x = board_size - corner_size - pos * space_size
         y = board_size - corner_size
     
-
     elif pos == 10:         # Just Visiting
         x = 0
         y = board_size - corner_size
@@ -194,7 +170,6 @@ def getPlayerPos(pos:int, board_size:int, corner_size:int, space_size:int):
     elif pos == 20:         # Free Parking
         x = 0
         y = 0
-
 
     elif 21 <= pos <= 29:   # Top row (Left to Right)
         x = corner_size + (pos - 21) * space_size
@@ -212,34 +187,8 @@ def getPlayerPos(pos:int, board_size:int, corner_size:int, space_size:int):
     else:
         raise ValueError("Invalid Position on Board")
         
-
     return (x + 10, y + 10)  # slight offset for visual padding
 
 def move_player(screen, current_pos:int, board_size:int, corner_size:int, space_size:int):
     x, y = getPlayerPos(current_pos, board_size, corner_size, space_size)
     pygame.draw.rect(screen, (0, 255, 0), (x, y, 25, 25))
-
-def create_board():
-    running = True
-    while running: 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-
-        ## Get the screen width and height for proper space creation
-        screen_width, screen_height = pygame.display.get_surface().get_size()
-
-        ## Properties of the board
-        board_size = int(min(screen_height, (5/8) * screen_width))
-        corner_size = board_size // 7
-        space_size = (board_size - 1.9 * corner_size) // 9
-
-        board_game(screen_width, screen_height, board_size, corner_size, space_size)
-        pygame.display.flip()
-        clock.tick(60)
-
-    pygame.quit()
-    sys.exit()
-
-if __name__ == "__main__":
-    create_board()

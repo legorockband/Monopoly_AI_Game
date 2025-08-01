@@ -1,6 +1,8 @@
 import pygame
 import dice
 import board_test
+import title_screen
+import player_cards
 import sys
 
 import os
@@ -10,8 +12,6 @@ import ctypes
 pygame.init()
 screen = pygame.display.set_mode((0, 0), pygame.RESIZABLE)
 
-screen_width, screen_height = pygame.display.get_surface().get_size()
-
 # Maximize the window (Windows only)
 if os.name == 'nt':
     hwnd = pygame.display.get_wm_info()['window']
@@ -20,6 +20,9 @@ if os.name == 'nt':
 clock = pygame.time.Clock()
 pygame.display.set_caption("Monopoly")
 value_font = pygame.font.SysFont('Arial', 30)
+text_font = pygame.font.SysFont(None, 20)
+
+screen_width, screen_height = pygame.display.get_surface().get_size()
 
 spaces_names = [
     "GO", "MEDITERRANEAN AVENUE", "COMMUNITY CHEST", "BALTIC AVENUE",
@@ -149,12 +152,15 @@ def running_display():
         corner_size = board_size // 7
         space_size = (board_size - 1.9 * corner_size) // 9
 
-        board_test.board_game(screen_width, screen_height, board_size, corner_size, space_size)
+        board_test.board_game(screen, text_font, board_size, corner_size, space_size)
 
         ## Make a button 
         dice.make_dice_button(screen, circ_color, circ_center, circ_rad)
 
         board_test.move_player(screen, player_pos, board_size, corner_size, space_size)
+
+        ## TODO: Change the number of players to the number from the title screen
+        player_cards.create_player_card(screen, 4, board_size, space_size, screen_width, screen_height)
 
         ## Display dice roll and total 
         if rolled:
@@ -177,5 +183,5 @@ def running_display():
     sys.exit()
 
 if __name__ == "__main__":
+    #num_players = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
     running_display()
-    print(total_roll)

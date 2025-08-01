@@ -7,11 +7,11 @@ import random
 
 pygame.init()
 
-## Set pygame screen
-screen_width = 800
-screen_height = 800
-screen = pygame.display.set_mode((screen_width, screen_height))
-pygame.display.set_caption("Dice Roller")
+# ## Set pygame screen
+# screen_width = 800
+# screen_height = 800
+# screen = pygame.display.set_mode((screen_width, screen_height))
+# pygame.display.set_caption("Dice Roller")
 
 ## Font 
 font = pygame.font.SysFont('Courier New', 30)
@@ -122,49 +122,3 @@ def make_dice_button(screen, circ_color, circ_center, circ_rad):
     button_text = value_font.render("ROLL", True, (255, 255, 255))
     text_rect = button_text.get_rect(center=circ_center)
     screen.blit(button_text, text_rect)
-
-if __name__ == "__main__":
-    running = True
-    rolled = None
-
-    doubles_rolled = []
-    is_double = False
-
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                mouse_pos = event.pos
-
-                ## If the mouse clicks on the button roll the dice
-                if is_inside_circle(mouse_pos, circ_center, circ_rad):
-                    rolled = dice_roll()
-                    is_doubles = dice_logic(rolled, doubles_rolled)
-
-        ## Fill the background with white
-        screen.fill((255, 255, 255))
-
-        ## Make a button 
-        pygame.draw.circle(screen, circ_color, circ_center, circ_rad)
-        button_text = value_font.render("ROLL", True, (255, 255, 255))
-        text_rect = button_text.get_rect(center=circ_center)
-        screen.blit(button_text, text_rect)
-
-        ## Display dice roll and total 
-        if rolled:
-            draw_dice(screen, rolled, 200, 200)
-            draw_total(screen, rolled)
-
-            if is_doubles:
-                doubles_text = value_font.render("You rolled doubles!", True, (0, 0, 0))
-                screen.blit(doubles_text, (screen_width//2 - doubles_text.get_width()//2, 50))
-
-            if len(doubles_rolled) >= 3:
-                jail_text = value_font.render("Too Many Doubles Rolled, Go To Jail", True, (255, 0, 0))
-                screen.blit(jail_text, (screen_width//2 - jail_text.get_width()//2, 150))
-        
-        pygame.display.flip()
-
-    pygame.quit()
