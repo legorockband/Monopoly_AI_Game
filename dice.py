@@ -96,7 +96,7 @@ def draw_dice(screen, dice_values, x, y):
             text_surface = font.render(row, True, (0, 0, 0))
             screen.blit(text_surface, (x + i * 200, y + row_index * 30))  # Offset for 2nd die
 
-def draw_total(screen, dice_values, x, y):
+def draw_total(screen, dice_values, x, y, value_font):
     total = sum(dice_values)
     total_surface = value_font.render(f"Total: {total}", True, (0, 0, 0))
     screen.blit(total_surface, (x - total_surface.get_width()//2, y))

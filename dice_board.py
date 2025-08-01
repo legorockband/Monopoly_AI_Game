@@ -19,8 +19,7 @@ if os.name == 'nt':
     
 clock = pygame.time.Clock()
 pygame.display.set_caption("Monopoly")
-font = pygame.font.SysFont(None, 16)
-value_font = pygame.font.SysFont('Arial', 36)
+value_font = pygame.font.SysFont('Arial', 30)
 
 spaces_names = [
     "GO", "MEDITERRANEAN AVENUE", "COMMUNITY CHEST", "BALTIC AVENUE",
@@ -115,7 +114,7 @@ but_color = (255, 0, 0)
 
 but_rect = pygame.Rect(but_x, but_y, but_width, but_height)
 
-circ_center = (1200, 400)
+circ_center = (1200, 375)
 circ_rad = 50
 circ_color = (255, 0, 0)
 
@@ -159,16 +158,16 @@ def running_display():
 
         ## Display dice roll and total 
         if rolled:
-            dice.draw_dice(screen, rolled, 1000, 200)
-            dice.draw_total(screen, rolled, 1200, 150)
+            dice.draw_dice(screen, rolled, circ_center[0] - 200, circ_center[1] - 200)
+            dice.draw_total(screen, rolled, circ_center[0], circ_center[1] - 350, value_font)
 
             if is_doubles:
                 doubles_text = value_font.render("You rolled doubles!", True, (0, 0, 0))
-                screen.blit(doubles_text, (1200 - doubles_text.get_width()//2, 50))
+                screen.blit(doubles_text, (circ_center[0] - doubles_text.get_width()//2, circ_center[1] - 300)) # 100
 
             if len(doubles_rolled) >= 3:
                 jail_text = value_font.render("Too Many Doubles Rolled, Go To Jail", True, (255, 0, 0))
-                screen.blit(jail_text, (1200 - jail_text.get_width()//2, 100))
+                screen.blit(jail_text, (circ_center[0] - jail_text.get_width()//2, circ_center[1] - 250))    # 150
         
 
         pygame.display.flip()
