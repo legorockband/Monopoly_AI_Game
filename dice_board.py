@@ -1,13 +1,13 @@
 import pygame
+import sys
+import os
+import ctypes
+
 import dice
 import board_test
 import title_screen
 import player_cards
-import sys
-
-import os
-import pygame
-import ctypes
+from game_test import Game
 
 pygame.init()
 screen = pygame.display.set_mode((0, 0), pygame.RESIZABLE)
@@ -108,30 +108,43 @@ DIE_HEIGHT = len(DICE_ART[1])
 DIE_WIDTH = len(DICE_ART[1][0])
 DIE_FACE_SEPARATOR = " "
 
+# TODO: Change the button rectangle to be dynamic with screen size 
 ## Button Properties 
 but_x = 1000
 but_y = 600
 but_width = 200
 but_height = 80
 but_color = (255, 0, 0)
-
 but_rect = pygame.Rect(but_x, but_y, but_width, but_height)
 
-circ_center = (1200, 375)
+
+## Properties of the board
+board_size = int(min(screen_height, (5/8) * screen_width))
+corner_size = board_size // 7
+space_size = (board_size - 1.9 * corner_size) // 9
+circ_center = (board_size + (screen_width - board_size)//2, 375)
+
 circ_rad = 50
 circ_color = (255, 0, 0)
 
 ## Global Var to know how much to move
 total_roll = None
 
-def running_display():
+player_colors = [(0,0,255), (0,255,0), (255,0,0), (0, 255, 255)]
+
+def running_display(num_players: int):
+    game = Game(player_names=[f"Player {i+1}" for i in range(num_players)])
+    for i, player in enumerate(game.players):
+        player.color = player_colors[i % len(player_colors)]
+
     running = True
     rolled = None
 
     doubles_rolled = []
     is_double = False
 
-    player_pos = 0  ## Starts at "GO"
+    player_idx = 0
+    player_pos = [0,0,0,0]  ## Starts at "GO"
 
     while running:
         for event in pygame.event.get():
@@ -142,25 +155,43 @@ def running_display():
 
                 ## If the mouse clicks on the button roll the dice
                 if dice.is_inside_circle(mouse_pos, circ_center, circ_rad):
-                    rolled = dice.dice_roll()
-                    is_doubles = dice.dice_logic(rolled, doubles_rolled)
-                    roll_total = sum(rolled)
-                    player_pos = (player_pos + roll_total) % 40     ## Added so it can only be 0 - 40
+                    player = game.players[player_idx]
+                    
+                    if player.in_jail:
+                        game.handle_jail_turn(player)
+                        if not player.in_jail:
+                            player_idx = (player_idx) + 1 % num_players
+                        continue
+                    
+                    roll_total, is_doubles = game.dice.roll()
+                    rolled = (game.dice.die1_value, game.dice.die2_value)
+                    player.move(roll_total, game.board)
 
-        ## Properties of the board
-        board_size = int(min(screen_height, (5/8) * screen_width))
-        corner_size = board_size // 7
-        space_size = (board_size - 1.9 * corner_size) // 9
+                    if is_doubles:
+                        player.doubles_rolled_consecutive += 1
+                        if player.doubles_rolled_consecutive == 3:
+                            print(f"{player.name} rolled 3 doubles! Go to jail.")
+                            player.in_jail = True
+                            player.position = game.board.jail_space_index
+                            player.doubles_rolled_consecutive = 0
+                            player_idx = (player_idx + 1) % num_players
+                    else:
+                        player.doubles_rolled_consecutive =0
+                        player_idx = (player_idx + 1) % num_players
 
         board_test.board_game(screen, text_font, board_size, corner_size, space_size)
 
         ## Make a button 
         dice.make_dice_button(screen, circ_color, circ_center, circ_rad)
 
-        board_test.move_player(screen, player_pos, board_size, corner_size, space_size)
+        board_test.move_player(screen, game.players, board_size, corner_size, space_size)
 
         ## TODO: Change the number of players to the number from the title screen
-        player_cards.create_player_card(screen, 4, board_size, space_size, screen_width, screen_height)
+        player_cards.create_player_card(screen, num_players, board_size, space_size, screen_width, screen_height)
+
+        current_player = game.players[player_idx]
+        turn_text = value_font.render(f"{current_player.name}'s Turn", True, current_player.color)
+        screen.blit(turn_text, (50, 50))
 
         ## Display dice roll and total 
         if rolled:
@@ -174,7 +205,7 @@ def running_display():
             if len(doubles_rolled) >= 3:
                 jail_text = value_font.render("Too Many Doubles Rolled, Go To Jail", True, (255, 0, 0))
                 screen.blit(jail_text, (circ_center[0] - jail_text.get_width()//2, circ_center[1] - 250))    # 150
-        
+           
 
         pygame.display.flip()
         clock.tick(60)
@@ -184,4 +215,5 @@ def running_display():
 
 if __name__ == "__main__":
     #num_players = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
-    running_display()
+    number_plays = 4
+    running_display(number_plays)

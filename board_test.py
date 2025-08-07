@@ -175,7 +175,6 @@ def getPlayerPos(pos:int, board_size:int, corner_size:int, space_size:int):
         x = corner_size + (pos - 21) * space_size
         y = 0
 
-
     elif pos == 30:         # Go To Jail
         x = board_size - corner_size
         y = 0
@@ -189,6 +188,8 @@ def getPlayerPos(pos:int, board_size:int, corner_size:int, space_size:int):
         
     return (x + 10, y + 10)  # slight offset for visual padding
 
-def move_player(screen, current_pos:int, board_size:int, corner_size:int, space_size:int):
-    x, y = getPlayerPos(current_pos, board_size, corner_size, space_size)
-    pygame.draw.rect(screen, (0, 255, 0), (x, y, 25, 25))
+## current_pos = [player1_pos, player2_pos, player3_pos, player4_pos]
+def move_player(screen, players, board_size:int, corner_size:int, space_size:int):
+    for idx, player in enumerate(players):
+        x, y = getPlayerPos(player.position, board_size, corner_size, space_size)
+        pygame.draw.rect(screen, player.color, (x + idx * 10, y + idx * 10, 20, 20))  # offset to avoid overlap

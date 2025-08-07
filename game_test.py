@@ -1,8 +1,9 @@
 import random
 
 class Player:
-    def __init__(self, name: str):
+    def __init__(self, name: str, color=(0,0,0)):
         self.name = name
+        self.color = color
         self.money = 1500
         self.position = 0
         self.properties_owned = []
@@ -192,13 +193,15 @@ class Property(Space):
     def land_on(self, player, board):
         super().land_on(player, board)
         if self.owner is None:
+            
+            ## TODO: Change this later
             # Property is unowned, offer to buy
             if player.money >= self.cost:
-                choice = input(f"  {player.name}, do you want to buy {self.name} for ${self.cost}? (y/n): ").lower()
-                if choice == 'y':
-                    player.add_property(self)
-                    player.pay_money(self.cost)
-                else:
+                # choice = input(f"  {player.name}, do you want to buy {self.name} for ${self.cost}? (y/n): ").lower()
+                # if choice == 'y':
+                #     player.add_property(self)
+                #     player.pay_money(self.cost)
+                # else:
                     print(f"  {player.name} chose not to buy {self.name}.")
                     #In a full game, this would trigger an auction. Simplified for now.
             else:
@@ -238,15 +241,17 @@ class Railroad(Space):
     def land_on(self, player, board):
         super().land_on(player, board)
         if self.owner is None:
-            # Railroad is unowned, offer to buy
-            if player.money >= self.cost:
-                choice = input(f"  {player.name}, do you want to buy {self.name} for ${self.cost}? (y/n): ").lower()
-                if choice == 'y':
-                    player.add_property(self)
-                    player.pay_money(self.cost)
-                else:
-                    print(f"  {player.name} chose not to buy {self.name}.")
-            else:
+            ## TODO: Change this later
+
+            # # Railroad is unowned, offer to buy
+            # if player.money >= self.cost:
+            #     choice = input(f"  {player.name}, do you want to buy {self.name} for ${self.cost}? (y/n): ").lower()
+            #     if choice == 'y':
+            #         player.add_property(self)
+            #         player.pay_money(self.cost)
+            #     else:
+            #         print(f"  {player.name} chose not to buy {self.name}.")
+            # else:
                 print(f"  {player.name} does not have enough money to buy {self.name}.")
         elif self.owner != player:
             # Railroad is owned by another player, pay rent
@@ -282,15 +287,17 @@ class Utility(Space):
     def land_on(self, player, board):
         super().land_on(player, board)
         if self.owner is None:
-            # Utility is unowned, offer to buy
-            if player.money >= self.cost:
-                choice = input(f"  {player.name}, do you want to buy {self.name} for ${self.cost}? (y/n): ").lower()
-                if choice == 'y':
-                    player.add_property(self)
-                    player.pay_money(self.cost)
-                else:
-                    print(f"  {player.name} chose not to buy {self.name}.")
-            else:
+            ## TODO: Change this later
+
+            # # Utility is unowned, offer to buy
+            # if player.money >= self.cost:
+            #     choice = input(f"  {player.name}, do you want to buy {self.name} for ${self.cost}? (y/n): ").lower()
+            #     if choice == 'y':
+            #         player.add_property(self)
+            #         player.pay_money(self.cost)
+            #     else:
+            #         print(f"  {player.name} chose not to buy {self.name}.")
+            # else:
                 print(f"  {player.name} does not have enough money to buy {self.name}.")
         elif self.owner != player:
             # Utility is owned by another player, pay rent
