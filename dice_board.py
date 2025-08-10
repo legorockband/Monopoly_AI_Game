@@ -24,100 +24,6 @@ text_font = pygame.font.SysFont(None, 20)
 
 screen_width, screen_height = pygame.display.get_surface().get_size()
 
-spaces_names = [
-    "GO", "MEDITERRANEAN AVENUE", "COMMUNITY CHEST", "BALTIC AVENUE",
-    "INCOME TAX", "READING RAILROAD", "ORIENTAL AVENUE", "CHANCE",
-    "VERTMONT AVENUE", "CONNETICUT AVENUE", "JUST VISITING", "ST. CHARLES PLACE",
-    "ELECTRIC COMPANY", "STATES AVENUE", "VIRGINIA AVENUE", "PENNSYLVANIA RAILROAD",
-    "ST. JAMES PLACE", "COMMUNITY CHEST", "TENNESSEE AVENUE", "NEW YORK AVENUE",
-    "FREE PARKING", "KENTUCKY AVENUCE", "CHANCE", "INDIANA AVENUE", "ILLIONOIS AVENUE",
-    "B. & O. RAILROAD", "ATLANTIC AVENUE", "VENTNOR AVENUE", "WATER WORKS",
-    "MARVIN GARDENS", "GO TO JAIL", "PACIFIC AVENUE", "NORTH CAROLINA AVENUE", "COMMUNITY CHEST",
-    "PENNSYLVANIA AVENUE", "SHORT LINE RAILROAD", "CHANCE", "PARK PLACE", "LUXURY TAX",
-    "BOARDWALK"
-]
-
-# shorter for the boxes for now
-spaces_names_2 = [
-    "GO", "MA", "CC", "BA",       
-    "Tax", "RR", "OA", "Ch", 
-    "VA", "CA", "Just Visiting", "SCP",    
-    "EC", "SA", "VA", "PRR", 
-    "SJP", "CC", "TA", "NYA", 
-    "Free Parking", "KA", "Ch", "IA", "ILA",  
-    "B&O", "AA", "VA", "WC", 
-    "MG", "Go To Jail", "PA", "NCA", "CC", 
-    "PAA", "SL", "Ch", "PP", "LT", 
-    "BW"
-]
-
-DICE_ART = {
-
-    1: (
-        "┌─────────┐",
-        "│         │",
-        "│    ●    │",
-        "│         │",
-        "└─────────┘",
-    ),
-
-    2: (
-        "┌─────────┐",
-        "│  ●      │",
-        "│         │",
-        "│      ●  │",
-        "└─────────┘",
-    ),
-
-    3: (
-        "┌─────────┐",
-        "│  ●      │",
-        "│    ●    │",
-        "│      ●  │",
-        "└─────────┘",
-    ),
-
-    4: (
-        "┌─────────┐",
-        "│  ●   ●  │",
-        "│         │",
-        "│  ●   ●  │",
-        "└─────────┘",
-    ),
-
-    5: (
-        "┌─────────┐",
-        "│  ●   ●  │",
-        "│    ●    │",
-        "│  ●   ●  │",
-        "└─────────┘",
-
-    ),
-
-    6: (
-        "┌─────────┐",
-        "│  ●   ●  │",
-        "│  ●   ●  │",
-        "│  ●   ●  │",
-        "└─────────┘",
-    ),
-
-}
-
-DIE_HEIGHT = len(DICE_ART[1])
-DIE_WIDTH = len(DICE_ART[1][0])
-DIE_FACE_SEPARATOR = " "
-
-# TODO: Change the button rectangle to be dynamic with screen size 
-## Button Properties 
-but_x = 1000
-but_y = 600
-but_width = 200
-but_height = 80
-but_color = (255, 0, 0)
-but_rect = pygame.Rect(but_x, but_y, but_width, but_height)
-
-
 ## Properties of the board
 board_size = int(min(screen_height, (5/8) * screen_width))
 corner_size = board_size // 7
@@ -126,9 +32,6 @@ circ_center = (board_size + (screen_width - board_size)//2, 375)
 
 circ_rad = 50
 circ_color = (255, 0, 0)
-
-## Global Var to know how much to move
-total_roll = None
 
 player_colors = [(0,0,255), (0,255,0), (255,0,0), (0, 255, 255)]
 
@@ -141,10 +44,9 @@ def running_display(num_players: int):
     rolled = None
 
     doubles_rolled = []
-    is_double = False
+    is_doubles = False
 
     player_idx = 0
-    player_pos = [0,0,0,0]  ## Starts at "GO"
 
     while running:
         for event in pygame.event.get():
@@ -165,6 +67,7 @@ def running_display(num_players: int):
                     
                     roll_total, is_doubles = game.dice.roll()
                     rolled = (game.dice.die1_value, game.dice.die2_value)
+
                     player.move(roll_total, game.board)
 
                     if is_doubles:
@@ -186,12 +89,14 @@ def running_display(num_players: int):
 
         board_test.move_player(screen, game.players, board_size, corner_size, space_size)
 
-        ## TODO: Change the number of players to the number from the title screen
-        player_cards.create_player_card(screen, num_players, board_size, space_size, screen_width, screen_height)
+        # Test player 2 money value
+        # game.players[1].money = 500
+        game.players[0].properties_owned = [0, 2, 5]   # Player 1 owns MA, BA, OA
+        game.players[1].properties_owned = [10, 11]    # Player 2 owns SCP, EC
 
-        current_player = game.players[player_idx]
-        turn_text = value_font.render(f"{current_player.name}'s Turn", True, current_player.color)
-        screen.blit(turn_text, (50, 50))
+        player_cards.create_player_card(screen, game.players, player_idx, board_size, space_size, screen_width, screen_height)
+
+        # board_test.display_card(screen, chance[0], board_size, screen_height)
 
         ## Display dice roll and total 
         if rolled:
@@ -215,5 +120,5 @@ def running_display(num_players: int):
 
 if __name__ == "__main__":
     #num_players = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
-    number_plays = 4
-    running_display(number_plays)
+    num_players = 4
+    running_display(num_players)

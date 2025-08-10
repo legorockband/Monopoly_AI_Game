@@ -1,21 +1,13 @@
 #board.py
 # reference link : https://www.pygame.org/docs/
 import pygame
-import ctypes
-import os
-import sys
+from game_test import Card
 
 spaces_names = [
-    "GO", "MEDITERRANEAN AVENUE", "COMMUNITY CHEST", "BALTIC AVENUE",
-    "INCOME TAX", "READING RAILROAD", "ORIENTAL AVENUE", "CHANCE",
-    "VERTMONT AVENUE", "CONNETICUT AVENUE", "JUST VISITING", "ST. CHARLES PLACE",
-    "ELECTRIC COMPANY", "STATES AVENUE", "VIRGINIA AVENUE", "PENNSYLVANIA RAILROAD",
-    "ST. JAMES PLACE", "COMMUNITY CHEST", "TENNESSEE AVENUE", "NEW YORK AVENUE",
-    "FREE PARKING", "KENTUCKY AVENUCE", "CHANCE", "INDIANA AVENUE", "ILLIONOIS AVENUE",
-    "B. & O. RAILROAD", "ATLANTIC AVENUE", "VENTNOR AVENUE", "WATER WORKS",
-    "MARVIN GARDENS", "GO TO JAIL", "PACIFIC AVENUE", "NORTH CAROLINA AVENUE", "COMMUNITY CHEST",
-    "PENNSYLVANIA AVENUE", "SHORT LINE RAILROAD", "CHANCE", "PARK PLACE", "LUXURY TAX",
-    "BOARDWALK"
+    "MEDITERRANEAN AVENUE", "COMMUNITY CHEST", "BALTIC AVENUE", "INCOME TAX", "READING RAILROAD", "ORIENTAL AVENUE", "CHANCE", "VERTMONT AVENUE", "CONNETICUT AVENUE", 
+    "ST. CHARLES PLACE","ELECTRIC COMPANY", "STATES AVENUE", "VIRGINIA AVENUE", "PENNSYLVANIA RAILROAD", "ST. JAMES PLACE", "COMMUNITY CHEST", "TENNESSEE AVENUE", "NEW YORK AVENUE", 
+    "KENTUCKY AVENUCE", "CHANCE", "INDIANA AVENUE", "ILLIONOIS AVENUE","B. & O. RAILROAD", "ATLANTIC AVENUE", "VENTNOR AVENUE", "WATER WORKS","MARVIN GARDENS", 
+    "PACIFIC AVENUE", "NORTH CAROLINA AVENUE", "COMMUNITY CHEST","PENNSYLVANIA AVENUE", "SHORT LINE RAILROAD", "CHANCE", "PARK PLACE", "LUXURY TAX","BOARDWALK"
 ]
 
 # shorter for the boxes for now
@@ -61,12 +53,11 @@ def board_game(screen, font, board_size:int, corner_size:int, space_size:int):
     # Top-right corner (Go to Jail)
     pygame.draw.rect(screen, (0, 0, 0), (corner_positions[3][0], corner_positions[3][1], corner_size, corner_size), 2)
 
-    # Bottom row: Created Left to right
-    for i in range(9):
-        idx = i
+    # Bottom row: Right to Left
+    for idx in range(9):
 
         ## Starting position is after the bottom left corner 
-        x = corner_size + (i) * space_size
+        x = board_size - corner_size - (idx + 1) * space_size
         y = board_size - corner_size
 
         pygame.draw.rect(screen, (0,0,0), (x, y, space_size, corner_size), 2)
@@ -108,7 +99,7 @@ def board_game(screen, font, board_size:int, corner_size:int, space_size:int):
         rect = label.get_rect(center=(x  - 15 + space_size // 2, y + space_size // 2))
         screen.blit(label, rect)
 
-    # Top Row: Created Left to right
+    # Top Row: Left to right
     for i in range(9):
         idx = 18 + i
         x = corner_size + i * space_size
@@ -188,8 +179,47 @@ def getPlayerPos(pos:int, board_size:int, corner_size:int, space_size:int):
         
     return (x + 10, y + 10)  # slight offset for visual padding
 
-## current_pos = [player1_pos, player2_pos, player3_pos, player4_pos]
 def move_player(screen, players, board_size:int, corner_size:int, space_size:int):
     for idx, player in enumerate(players):
         x, y = getPlayerPos(player.position, board_size, corner_size, space_size)
         pygame.draw.rect(screen, player.color, (x + idx * 10, y + idx * 10, 20, 20))  # offset to avoid overlap
+
+def display_card(screen, card, board_size, screen_height):
+    card_width = 200
+    card_height = 250
+    card_x = board_size // 2 - card_width // 2
+    card_y = screen_height // 2 - card_height // 2
+
+    # Draw card background and border
+    pygame.draw.rect(screen, (255, 255, 224), (card_x, card_y, card_width, card_height))  # Light yellow
+    pygame.draw.rect(screen, (0, 0, 0), (card_x, card_y, card_width, card_height), 2)
+
+    # Card Title 
+    title_font = pygame.font.SysFont("Arial", 24, bold=True)
+    descript_font = pygame.font.SysFont(None, 25)
+    title_text = title_font.render(card.card_type.upper(), True, (0, 0, 0))
+    screen.blit(title_text, (card_x + (card_width - title_text.get_width()) // 2, card_y + 10))
+
+    # Card description 
+    description_lines = wrap_text(card.description, descript_font, card_width - 20)
+    for i, line in enumerate(description_lines):
+        line_surface = descript_font.render(line, True, (0, 0, 0))
+        screen.blit(line_surface, (card_x + 10, card_y + 50 + i * 22))
+
+def wrap_text(text, font, max_width):
+    # Breaks text into lines that fit within max_width
+    words = text.split()
+    lines = []
+    current_line = ""
+    
+    for word in words:
+        test_line = current_line + " " + word if current_line else word
+        if font.size(test_line)[0] <= max_width:
+            current_line = test_line
+        else:
+            lines.append(current_line)
+            current_line = word
+    if current_line:
+        lines.append(current_line)
+    
+    return lines

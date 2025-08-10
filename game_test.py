@@ -12,7 +12,6 @@ class Player:
         self.get_out_of_jail_free_cards = 0
         self.doubles_rolled_consecutive = 0 
 
-    
     def move(self, spaces_to_move: int, board):
         old_position = self.position
 
@@ -152,7 +151,6 @@ class Space:
     def land_on(self, player, board):
         print(f"  {player.name} landed on {self.name} ({self.type}).")
 
-
 class GoSpace(Space):
     def __init__(self, name: str, index: int):
         super().__init__(name, index, "Go")
@@ -161,8 +159,6 @@ class GoSpace(Space):
         #super().land_on(player, board)
         player.collect_money(200)
         print(f"{self.name} landed on Go and Collected $200.")
-
-
 
 class Property(Space):
     def __init__(self, name: str, index: int, cost: int, color_group: str,
@@ -221,7 +217,6 @@ class Property(Space):
         else:
             print(f"  {player.name} landed on their own property, {self.name}.")
 
-    
 class Railroad(Space):
     """Represents a Railroad property."""
     def __init__(self, name: str, index: int, cost: int, mortgage_value: int):
@@ -265,7 +260,6 @@ class Railroad(Space):
                 print(f"  {self.name} is mortgaged, no rent due.")
         else:
             print(f"  {player.name} landed on their own railroad, {self.name}.")
-
 
 class Utility(Space):
     def __init__(self, name: str, index: int, cost: int, mortgage_value: int):
@@ -323,7 +317,6 @@ class TaxSpace(Space):
         print(f"  {player.name} pays ${self.tax_amount} for {self.name}.")
         player.pay_money(self.tax_amount)
 
-
 class ChanceSpace(Space):
     def __init__(self, name: str, index: int):
         super().__init__(name, index, "Chance")
@@ -337,7 +330,6 @@ class ChanceSpace(Space):
             board.game.chance_cards.append(card) # Return card to bottom of deck
         else:
             print("  Chance deck is empty!")
-
 
 class CommunityChestSpace(Space):
     def __init__(self, name: str, index: int):
@@ -353,7 +345,6 @@ class CommunityChestSpace(Space):
         else:
             print("  Community Chest deck is empty!")
 
-
 class GoToJailSpace(Space):
     def __init__(self, name: str, index: int):
         super().__init__(name, index, "GoToJail")
@@ -365,7 +356,6 @@ class GoToJailSpace(Space):
         player.position = board.jail_space_index # Move to Jail space
         player.jail_turns = 0 # Reset jail turns for entering via card
 
-
 class JailSpace(Space):
     def __init__(self, name: str, index: int):
         super().__init__(name, index, "Jail")
@@ -374,7 +364,6 @@ class JailSpace(Space):
         super().land_on(player, board)
         # No special action for landing here if "just visiting"
         # The 'in_jail' status and related logic is handled by Game.handle_jail_turn
-
 
 class FreeParkingSpace(Space):
     def __init__(self, name: str, index: int):
@@ -385,7 +374,6 @@ class FreeParkingSpace(Space):
         print(f"  {player.name} is just visiting Free Parking.")
         # Default Monopoly rules: Free Parking does nothing.
 
-
 class Board:
     def __init__(self, game_instance):
         self.spaces = []
@@ -393,7 +381,6 @@ class Board:
         self.go_space_index = 0 
         self.game = game_instance
         self.initialize_board()
-
 
     def initialize_board(self):
         
@@ -467,7 +454,6 @@ class Board:
         self.spaces.append(Property("Park Place", 37, 350, "Dark Blue", [35, 175, 500, 1100, 1300, 1500], 200, 175))
         self.spaces.append(TaxSpace("Luxury Tax", 38, 100)) # Fixed tax of $100
         self.spaces.append(Property("Boardwalk", 39, 400, "Dark Blue", [50, 200, 600, 1400, 1700, 2000], 200, 200))
-
 
 class Game:
     def __init__(self, player_names: list):
@@ -630,20 +616,20 @@ class Game:
                 player.move(roll_sum, self.board)
                 return
 
-        #Pay $50 Fine (available on first 3 turns)
-        if player.jail_turns <= 3:
-            if player.money >= 50:
-                choice = input(f"  {player.name}, pay $50 to get out of Jail? (y/n): ").lower()
-                if choice == 'y':
-                    player.pay_money(50)
-                    player.in_jail = False
-                    player.jail_turns = 0
-                    print(f"  {player.name} paid $50 to get out of Jail.")
-                    roll_sum, is_double = self.dice.roll()
-                    player.move(roll_sum, self.board)
-                    return 
-            else:
-                print(f"  {player.name} does not have enough money to pay $50 fine.")
+        # #Pay $50 Fine (available on first 3 turns)
+        # if player.jail_turns <= 3:
+        #     if player.money >= 50:
+        #         choice = input(f"  {player.name}, pay $50 to get out of Jail? (y/n): ").lower()
+        #         if choice == 'y':
+        #             player.pay_money(50)
+        #             player.in_jail = False
+        #             player.jail_turns = 0
+        #             print(f"  {player.name} paid $50 to get out of Jail.")
+        #             roll_sum, is_double = self.dice.roll()
+        #             player.move(roll_sum, self.board)
+        #             return 
+        #     else:
+            print(f"  {player.name} does not have enough money to pay $50 fine.")
 
         #Roll for Doubles
         print(f"  {player.name} attempts to roll for doubles to get out of Jail...")
