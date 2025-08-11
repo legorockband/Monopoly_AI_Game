@@ -186,22 +186,19 @@ class Property(Space):
             return self.rent_values[0] * 2
         return self.rent_values[0]
 
+    # Will be Updating this.
     def land_on(self, player, board):
         super().land_on(player, board)
         if self.owner is None:
-            
-            ## TODO: Change this later
-            # Property is unowned, offer to buy
-            if player.money >= self.cost:
-                # choice = input(f"  {player.name}, do you want to buy {self.name} for ${self.cost}? (y/n): ").lower()
-                # if choice == 'y':
-                #     player.add_property(self)
-                #     player.pay_money(self.cost)
-                # else:
-                    print(f"  {player.name} chose not to buy {self.name}.")
+            affordable = player.money >= self.cost
+            board.game.pending_purchase ={"player": player, "property": self, "affordable": affordable}
+            # if property is unowned and player can afford it -> we save info in the pending_purchase
+            if affordable:
+                print(f"  {player.name} may buy {self.name} for ${self.cost}.")
                     #In a full game, this would trigger an auction. Simplified for now.
             else:
-                print(f"  {player.name} does not have enough money to buy {self.name}.")
+                print(f"  {player.name} cannot afford {self.name} (${self.cost}).")
+            return
 
         elif self.owner != player:
             # Property is owned by another player, pay rent
@@ -236,18 +233,14 @@ class Railroad(Space):
     def land_on(self, player, board):
         super().land_on(player, board)
         if self.owner is None:
-            ## TODO: Change this later
-
-            # # Railroad is unowned, offer to buy
-            # if player.money >= self.cost:
-            #     choice = input(f"  {player.name}, do you want to buy {self.name} for ${self.cost}? (y/n): ").lower()
-            #     if choice == 'y':
-            #         player.add_property(self)
-            #         player.pay_money(self.cost)
-            #     else:
-            #         print(f"  {player.name} chose not to buy {self.name}.")
-            # else:
-                print(f"  {player.name} does not have enough money to buy {self.name}.")
+                affordable = player.money >= self.cost
+                board.game.pending_purchase = {"player": player, "property": self, "affordable": affordable}
+                if affordable:
+                    print(f"  {player.name} may buy {self.name} for ${self.cost}.")
+                else:
+                    print(f"  {player.name} cannot afford {self.name} (${self.cost}).")
+                return
+    
         elif self.owner != player:
             # Railroad is owned by another player, pay rent
             num_owned = self.owner.count_railroads()
@@ -281,18 +274,13 @@ class Utility(Space):
     def land_on(self, player, board):
         super().land_on(player, board)
         if self.owner is None:
-            ## TODO: Change this later
-
-            # # Utility is unowned, offer to buy
-            # if player.money >= self.cost:
-            #     choice = input(f"  {player.name}, do you want to buy {self.name} for ${self.cost}? (y/n): ").lower()
-            #     if choice == 'y':
-            #         player.add_property(self)
-            #         player.pay_money(self.cost)
-            #     else:
-            #         print(f"  {player.name} chose not to buy {self.name}.")
-            # else:
-                print(f"  {player.name} does not have enough money to buy {self.name}.")
+            affordable = player.money >= self.cost
+            board.game.pending_purchase = {"player": player, "property": self, "affordable": affordable}
+            if affordable:
+                print(f"  {player.name} may buy {self.name} for ${self.cost}.")
+            else:
+                print(f"  {player.name} cannot afford {self.name} (${self.cost}).")
+            return
         elif self.owner != player:
             # Utility is owned by another player, pay rent
             last_roll_sum = board.game.dice.die1_value + board.game.dice.die2_value # Get the sum of the last roll
@@ -466,7 +454,8 @@ class Game:
         self.dice = Dice()
         self.chance_cards = self._initialize_cards("Chance")
         self.community_chest_cards = self._initialize_cards("Community Chest")
-        
+        self.pending_purchase = None
+
         # Shuffle cards
         random.shuffle(self.chance_cards)
         random.shuffle(self.community_chest_cards)
@@ -504,6 +493,23 @@ class Game:
             cards.append(Card("You inherit $100.", "Community Chest", "collect_money", value=100))
 
         return cards
+
+    def confirm_purchase(self, accept: bool):
+        """Finalize a pending purchase (called from UI)."""
+        if not self.pending_purchase:
+            return
+        info = self.pending_purchase
+        player = info["player"]
+        prop = info["property"]
+
+        if accept and getattr(prop, "owner", None) is None and hasattr(prop, "cost") and player.money >= prop.cost:
+            player.pay_money(prop.cost)
+            player.add_property(prop)
+            print(f"{player.name} bought {prop.name} for ${prop.cost}.")
+        else:
+            print(f"{player.name} skipped buying {prop.name}.")
+
+        self.pending_purchase = None
 
 
     def start_game(self):

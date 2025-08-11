@@ -1,6 +1,5 @@
 import pygame
 from game_test import Player
-from board_test import spaces_names_2, spaces_names
 
 
 # Display the a large player card for the current player 
@@ -29,15 +28,16 @@ def create_player_card(screen: pygame.Surface, player:list[Player], player_idx:i
     screen.blit(money_text, (board_size + 10, starting_pos + 45))
     
     # Render properties line-by-line
-    for idx, prop_index  in enumerate(property_owned):
-        _, prop_price, prop_color = spaces_names_2[prop_index]
-        prop_name = spaces_names[prop_index]
-        # Use property color if available; otherwise fallback to white
-        text_color = prop_color if prop_color is not None else (0, 0, 0)
+    for idx, prop in enumerate(property_owned):
+        prop_name = prop.name
 
-        line_text = card_font.render(f"- {prop_name} ({prop_price})", True, text_color)
+        if hasattr(prop, "cost") and isinstance(prop.cost, int):
+            cost_text = f" (${prop.cost})"
+        else:
+            cost_text = ""
+        text_color = (0, 0, 0)
+
+        line_text = card_font.render(f"- {prop_name}{cost_text}", True, text_color)
         screen.blit(line_text, (board_size + 10, starting_pos + 75 + idx * 20))
-
-    # # Create smaller cards for the other players 
-    # for i in range(len(player)):
+        
 
