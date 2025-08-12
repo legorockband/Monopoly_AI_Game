@@ -140,7 +140,6 @@ class Card:
         else:
             print(f"WARNING: Unhandled card action type: {self.action_type}")
 
-
 class Space:
     #Base Class for Spaces
     def __init__(self, name: str, index: int, space_type: str):
@@ -161,7 +160,7 @@ class GoSpace(Space):
         print(f"{self.name} landed on Go and Collected $200.")
 
 class Property(Space):
-    def __init__(self, name: str, index: int, cost: int, color_group: str,
+    def __init__(self, name: str, index: int, cost: int, color_group: tuple[int, int, int],
                  rent_values: list, house_cost: int, mortgage_value: int):
         
         super().__init__(name, index, "Property")
@@ -186,22 +185,19 @@ class Property(Space):
             return self.rent_values[0] * 2
         return self.rent_values[0]
 
+    # Will be Updating this.
     def land_on(self, player, board):
         super().land_on(player, board)
         if self.owner is None:
-            
-            ## TODO: Change this later
-            # Property is unowned, offer to buy
-            if player.money >= self.cost:
-                # choice = input(f"  {player.name}, do you want to buy {self.name} for ${self.cost}? (y/n): ").lower()
-                # if choice == 'y':
-                #     player.add_property(self)
-                #     player.pay_money(self.cost)
-                # else:
-                    print(f"  {player.name} chose not to buy {self.name}.")
+            affordable = player.money >= self.cost
+            board.game.pending_purchase ={"player": player, "property": self, "affordable": affordable}
+            # if property is unowned and player can afford it -> we save info in the pending_purchase
+            if affordable:
+                print(f"  {player.name} may buy {self.name} for ${self.cost}.")
                     #In a full game, this would trigger an auction. Simplified for now.
             else:
-                print(f"  {player.name} does not have enough money to buy {self.name}.")
+                print(f"  {player.name} cannot afford {self.name} (${self.cost}).")
+            return
 
         elif self.owner != player:
             # Property is owned by another player, pay rent
@@ -236,18 +232,14 @@ class Railroad(Space):
     def land_on(self, player, board):
         super().land_on(player, board)
         if self.owner is None:
-            ## TODO: Change this later
-
-            # # Railroad is unowned, offer to buy
-            # if player.money >= self.cost:
-            #     choice = input(f"  {player.name}, do you want to buy {self.name} for ${self.cost}? (y/n): ").lower()
-            #     if choice == 'y':
-            #         player.add_property(self)
-            #         player.pay_money(self.cost)
-            #     else:
-            #         print(f"  {player.name} chose not to buy {self.name}.")
-            # else:
-                print(f"  {player.name} does not have enough money to buy {self.name}.")
+                affordable = player.money >= self.cost
+                board.game.pending_purchase = {"player": player, "property": self, "affordable": affordable}
+                if affordable:
+                    print(f"  {player.name} may buy {self.name} for ${self.cost}.")
+                else:
+                    print(f"  {player.name} cannot afford {self.name} (${self.cost}).")
+                return
+    
         elif self.owner != player:
             # Railroad is owned by another player, pay rent
             num_owned = self.owner.count_railroads()
@@ -281,18 +273,13 @@ class Utility(Space):
     def land_on(self, player, board):
         super().land_on(player, board)
         if self.owner is None:
-            ## TODO: Change this later
-
-            # # Utility is unowned, offer to buy
-            # if player.money >= self.cost:
-            #     choice = input(f"  {player.name}, do you want to buy {self.name} for ${self.cost}? (y/n): ").lower()
-            #     if choice == 'y':
-            #         player.add_property(self)
-            #         player.pay_money(self.cost)
-            #     else:
-            #         print(f"  {player.name} chose not to buy {self.name}.")
-            # else:
-                print(f"  {player.name} does not have enough money to buy {self.name}.")
+            affordable = player.money >= self.cost
+            board.game.pending_purchase = {"player": player, "property": self, "affordable": affordable}
+            if affordable:
+                print(f"  {player.name} may buy {self.name} for ${self.cost}.")
+            else:
+                print(f"  {player.name} cannot afford {self.name} (${self.cost}).")
+            return
         elif self.owner != player:
             # Utility is owned by another player, pay rent
             last_roll_sum = board.game.dice.die1_value + board.game.dice.die2_value # Get the sum of the last roll
@@ -326,7 +313,13 @@ class ChanceSpace(Space):
         # Draw and execute a Chance card
         if board.game.chance_cards:
             card = board.game.chance_cards.pop(0) # Take card from top
-            card.execute(player, board.game)
+            board.game.last_drawn_card = card
+            #card.execute(player, board.game)
+            board.game.pending_card ={
+                "type": "Chance",
+                "card": card,
+                "player": player
+            }
             board.game.chance_cards.append(card) # Return card to bottom of deck
         else:
             print("  Chance deck is empty!")
@@ -340,8 +333,15 @@ class CommunityChestSpace(Space):
         # Draw and execute a Community Chest card
         if board.game.community_chest_cards:
             card = board.game.community_chest_cards.pop(0) # Take card from top
-            card.execute(player, board.game)
+            board.game.last_drawn_card = card
+            # card.execute(player, board.game)
+            board.game.pending_card ={
+                "type": "Community Chest",
+                "card": card,
+                "player": player
+            }
             board.game.community_chest_cards.append(card) # Return card to bottom of deck
+        
         else:
             print("  Community Chest deck is empty!")
 
@@ -386,64 +386,64 @@ class Board:
         
         # Brown Properties (House Cost: $50)
         self.spaces.append(GoSpace("GO", 0))
-        self.spaces.append(Property("Mediterranean Avenue", 1, 60, "Brown", [2, 10, 30, 90, 160, 250], 50, 30))
+        self.spaces.append(Property("Mediterranean Avenue", 1, 60, (150, 75, 0), [2, 10, 30, 90, 160, 250], 50, 30))
         self.spaces.append(CommunityChestSpace("Community Chest", 2))
-        self.spaces.append(Property("Baltic Avenue", 3, 60, "Brown", [4, 20, 60, 180, 320, 450], 50, 30))
+        self.spaces.append(Property("Baltic Avenue", 3, 60, (150, 75, 0), [4, 20, 60, 180, 320, 450], 50, 30))
         self.spaces.append(TaxSpace("Income Tax", 4, 200))
         
         # Railroads (Cost: $200, Mortgage: $100)
         self.spaces.append(Railroad("Reading Railroad", 5, 200, 100))
 
         # Light Blue Properties (House Cost: $50)
-        self.spaces.append(Property("Oriental Avenue", 6, 100, "Light Blue", [6, 30, 90, 270, 400, 550], 50, 50))
+        self.spaces.append(Property("Oriental Avenue", 6, 100, (173, 216, 230), [6, 30, 90, 270, 400, 550], 50, 50))
         self.spaces.append(ChanceSpace("Chance", 7))
-        self.spaces.append(Property("Vermont Avenue", 8, 100, "Light Blue", [6, 30, 90, 270, 400, 550], 50, 50))
-        self.spaces.append(Property("Connecticut Avenue", 9, 120, "Light Blue", [8, 40, 100, 300, 450, 600], 50, 60))
+        self.spaces.append(Property("Vermont Avenue", 8, 100, (173, 216, 230), [6, 30, 90, 270, 400, 550], 50, 50))
+        self.spaces.append(Property("Connecticut Avenue", 9, 120, (173, 216, 230), [8, 40, 100, 300, 450, 600], 50, 60))
         
         # Jail (Just Visiting)
         self.spaces.append(JailSpace("Jail / Just Visiting", 10))
 
         # Pink Properties (House Cost: $100)
-        self.spaces.append(Property("St. Charles Place", 11, 140, "Pink", [10, 50, 150, 450, 625, 750], 100, 70))
+        self.spaces.append(Property("St. Charles Place", 11, 140, (255, 0, 255), [10, 50, 150, 450, 625, 750], 100, 70))
         self.spaces.append(Utility("Electric Company", 12, 150, 75)) # Utility (Cost: $150, Mortgage: $75)
-        self.spaces.append(Property("States Avenue", 13, 140, "Pink", [10, 50, 150, 450, 625, 750], 100, 70))
-        self.spaces.append(Property("Virginia Avenue", 14, 160, "Pink", [12, 60, 180, 500, 700, 900], 100, 80))
+        self.spaces.append(Property("States Avenue", 13, 140, (255, 0, 255), [10, 50, 150, 450, 625, 750], 100, 70))
+        self.spaces.append(Property("Virginia Avenue", 14, 160, (255, 0, 255), [12, 60, 180, 500, 700, 900], 100, 80))
         
         # Railroads
         self.spaces.append(Railroad("Pennsylvania Railroad", 15, 200, 100))
 
         # Orange Properties (House Cost: $100)
-        self.spaces.append(Property("St. James Place", 16, 180, "Orange", [14, 70, 200, 550, 750, 950], 100, 90))
+        self.spaces.append(Property("St. James Place", 16, 180, (255, 165, 0), [14, 70, 200, 550, 750, 950], 100, 90))
         self.spaces.append(CommunityChestSpace("Community Chest", 17))
-        self.spaces.append(Property("Tennessee Avenue", 18, 180, "Orange", [14, 70, 200, 550, 750, 950], 100, 90))
-        self.spaces.append(Property("New York Avenue", 19, 200, "Orange", [16, 80, 220, 600, 800, 1000], 100, 100))
+        self.spaces.append(Property("Tennessee Avenue", 18, 180, (255, 165, 0), [14, 70, 200, 550, 750, 950], 100, 90))
+        self.spaces.append(Property("New York Avenue", 19, 200, (255, 165, 0), [16, 80, 220, 600, 800, 1000], 100, 100))
         
         # Free Parking
         self.spaces.append(FreeParkingSpace("Free Parking", 20))
 
         # Red Properties (House Cost: $150)
-        self.spaces.append(Property("Kentucky Avenue", 21, 220, "Red", [18, 90, 250, 700, 875, 1050], 150, 110))
+        self.spaces.append(Property("Kentucky Avenue", 21, 220, (255, 0, 0), [18, 90, 250, 700, 875, 1050], 150, 110))
         self.spaces.append(ChanceSpace("Chance", 22))
-        self.spaces.append(Property("Indiana Avenue", 23, 220, "Red", [18, 90, 250, 700, 875, 1050], 150, 110))
-        self.spaces.append(Property("Illinois Avenue", 24, 240, "Red", [20, 100, 300, 750, 925, 1100], 150, 120))
+        self.spaces.append(Property("Indiana Avenue", 23, 220, (255, 0, 0), [18, 90, 250, 700, 875, 1050], 150, 110))
+        self.spaces.append(Property("Illinois Avenue", 24, 240, (255, 0, 0), [20, 100, 300, 750, 925, 1100], 150, 120))
         
         # Railroads
         self.spaces.append(Railroad("B. & O. Railroad", 25, 200, 100))
 
         # Yellow Properties (House Cost: $150)
-        self.spaces.append(Property("Atlantic Avenue", 26, 260, "Yellow", [22, 110, 330, 800, 975, 1150], 150, 130))
-        self.spaces.append(Property("Ventnor Avenue", 27, 260, "Yellow", [22, 110, 330, 800, 975, 1150], 150, 130))
+        self.spaces.append(Property("Atlantic Avenue", 26, 260, (255, 255, 0), [22, 110, 330, 800, 975, 1150], 150, 130))
+        self.spaces.append(Property("Ventnor Avenue", 27, 260, (255, 255, 0), [22, 110, 330, 800, 975, 1150], 150, 130))
         self.spaces.append(Utility("Water Works", 28, 150, 75)) # Utility
-        self.spaces.append(Property("Marvin Gardens", 29, 280, "Yellow", [24, 120, 360, 850, 1025, 1200], 150, 140))
+        self.spaces.append(Property("Marvin Gardens", 29, 280, (255, 255, 0), [24, 120, 360, 850, 1025, 1200], 150, 140))
         
         # Go To Jail
         self.spaces.append(GoToJailSpace("Go To Jail", 30))
 
         # Green Properties (House Cost: $200)
-        self.spaces.append(Property("Pacific Avenue", 31, 300, "Green", [26, 130, 390, 900, 1100, 1275], 200, 150))
-        self.spaces.append(Property("North Carolina Avenue", 32, 300, "Green", [26, 130, 390, 900, 1100, 1275], 200, 150))
+        self.spaces.append(Property("Pacific Avenue", 31, 300, (0, 255, 0), [26, 130, 390, 900, 1100, 1275], 200, 150))
+        self.spaces.append(Property("North Carolina Avenue", 32, 300, (0, 255, 0), [26, 130, 390, 900, 1100, 1275], 200, 150))
         self.spaces.append(CommunityChestSpace("Community Chest", 33))
-        self.spaces.append(Property("Pennsylvania Avenue", 34, 320, "Green", [28, 150, 450, 1000, 1200, 1400], 200, 160))
+        self.spaces.append(Property("Pennsylvania Avenue", 34, 320, (0, 255, 0), [28, 150, 450, 1000, 1200, 1400], 200, 160))
         
         # Railroads
         self.spaces.append(Railroad("Short Line", 35, 200, 100))
@@ -451,9 +451,9 @@ class Board:
         self.spaces.append(ChanceSpace("Chance", 36))
 
         # Dark Blue Properties (House Cost: $200)
-        self.spaces.append(Property("Park Place", 37, 350, "Dark Blue", [35, 175, 500, 1100, 1300, 1500], 200, 175))
+        self.spaces.append(Property("Park Place", 37, 350, (0, 0, 139), [35, 175, 500, 1100, 1300, 1500], 200, 175))
         self.spaces.append(TaxSpace("Luxury Tax", 38, 100)) # Fixed tax of $100
-        self.spaces.append(Property("Boardwalk", 39, 400, "Dark Blue", [50, 200, 600, 1400, 1700, 2000], 200, 200))
+        self.spaces.append(Property("Boardwalk", 39, 400, (0, 0, 139), [50, 200, 600, 1400, 1700, 2000], 200, 200))
 
 class Game:
     def __init__(self, player_names: list):
@@ -466,7 +466,10 @@ class Game:
         self.dice = Dice()
         self.chance_cards = self._initialize_cards("Chance")
         self.community_chest_cards = self._initialize_cards("Community Chest")
-        
+        self.pending_purchase = None
+        self.last_drawn_card = None
+        self.pending_card = None
+
         # Shuffle cards
         random.shuffle(self.chance_cards)
         random.shuffle(self.community_chest_cards)
@@ -504,6 +507,23 @@ class Game:
             cards.append(Card("You inherit $100.", "Community Chest", "collect_money", value=100))
 
         return cards
+
+    def confirm_purchase(self, accept: bool):
+        """Finalize a pending purchase (called from UI)."""
+        if not self.pending_purchase:
+            return
+        info = self.pending_purchase
+        player = info["player"]
+        prop = info["property"]
+
+        if accept and getattr(prop, "owner", None) is None and hasattr(prop, "cost") and player.money >= prop.cost:
+            player.pay_money(prop.cost)
+            player.add_property(prop)
+            print(f"{player.name} bought {prop.name} for ${prop.cost}.")
+        else:
+            print(f"{player.name} skipped buying {prop.name}.")
+
+        self.pending_purchase = None
 
 
     def start_game(self):
@@ -606,7 +626,7 @@ class Game:
 
         #Use Get Out of Jail Free Card
         if player.get_out_of_jail_free_cards > 0:
-            choice = input(f"  {player.name}, use Get Out of Jail Free card? (y/n): ").lower()
+            choice = 'y' #input(f"  {player.name}, use Get Out of Jail Free card? (y/n): ").lower()
             if choice == 'y':
                 player.get_out_of_jail_free_cards -= 1
                 player.in_jail = False

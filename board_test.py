@@ -184,7 +184,7 @@ def move_player(screen, players, board_size:int, corner_size:int, space_size:int
         x, y = getPlayerPos(player.position, board_size, corner_size, space_size)
         pygame.draw.rect(screen, player.color, (x + idx * 10, y + idx * 10, 20, 20))  # offset to avoid overlap
 
-def display_card(screen, card, board_size, screen_height):
+def display_card(screen, current_player, card, board_size, screen_height):
     card_width = 200
     card_height = 250
     card_x = board_size // 2 - card_width // 2
@@ -205,6 +205,10 @@ def display_card(screen, card, board_size, screen_height):
     for i, line in enumerate(description_lines):
         line_surface = descript_font.render(line, True, (0, 0, 0))
         screen.blit(line_surface, (card_x + 10, card_y + 50 + i * 22))
+
+    # Show which player needs to do certain action
+    player_text = descript_font.render(f"{current_player.name}", True, current_player.color)
+    screen.blit(player_text, (card_x + (card_width - title_text.get_width()) // 2, card_y + card_height - 25))
 
 def wrap_text(text, font, max_width):
     # Breaks text into lines that fit within max_width
