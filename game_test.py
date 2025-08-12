@@ -314,13 +314,11 @@ class ChanceSpace(Space):
         if board.game.chance_cards:
             card = board.game.chance_cards.pop(0) # Take card from top
             board.game.last_drawn_card = card
-            #card.execute(player, board.game)
             board.game.pending_card ={
                 "type": "Chance",
                 "card": card,
                 "player": player
             }
-            board.game.chance_cards.append(card) # Return card to bottom of deck
         else:
             print("  Chance deck is empty!")
 
@@ -334,14 +332,11 @@ class CommunityChestSpace(Space):
         if board.game.community_chest_cards:
             card = board.game.community_chest_cards.pop(0) # Take card from top
             board.game.last_drawn_card = card
-            # card.execute(player, board.game)
             board.game.pending_card ={
                 "type": "Community Chest",
                 "card": card,
                 "player": player
-            }
-            board.game.community_chest_cards.append(card) # Return card to bottom of deck
-        
+            }        
         else:
             print("  Community Chest deck is empty!")
 
@@ -676,7 +671,6 @@ class Game:
                     print(f"\n--- Game Over! {self.players[0].name} is the winner! ---")
         else:
             print(f"  {player.name} could not roll doubles and remains in Jail.")
-
 
 if __name__ == "__main__":
 

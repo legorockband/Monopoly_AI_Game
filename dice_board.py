@@ -113,6 +113,7 @@ def running_display(num_players: int):
                         player_card = pending_card["player"]
                         card.execute(player_card, game)
 
+                        # Move the card drawn to the bottom of the deck
                         if pending_card["type"] == "Chance":
                             game.chance_cards.append(card)
                         else:
