@@ -23,7 +23,7 @@ def run_title_screen(screen, clock, screen_width, screen_height):
                                   button_rect.centery - button_text.get_height() // 2))
 
         if input_active:
-            input_text = font_small.render("Enter number of players (2-6): " + user_text, True, (255, 255, 255))
+            input_text = font_small.render("Enter number of players (2-4): " + user_text, True, (255, 255, 255))
             screen.blit(input_text, (screen_width // 2 - input_text.get_width() // 2, screen_height // 2 + 100))
 
         for event in pygame.event.get():
@@ -40,7 +40,7 @@ def run_title_screen(screen, clock, screen_width, screen_height):
                 if event.key == pygame.K_RETURN:
                     if user_text.isdigit():
                         num = int(user_text)
-                        if 2 <= num <= 6:
+                        if 2 <= num <= 4:
                             return num
                         else:
                             user_text = ''

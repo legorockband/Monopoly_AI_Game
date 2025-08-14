@@ -94,6 +94,7 @@ def running_display(num_players: int):
     is_doubles = False
 
     player_idx = 0
+    selected_space = None
 
     while running:
         for event in pygame.event.get():
@@ -138,8 +139,23 @@ def running_display(num_players: int):
                             player_idx = (player_idx + 1) % num_players
                     continue
                 
+                if selected_space is not None:
+                    selected_space = None
+                    continue
+
+                if space_rects:  # populated below each frame
+                    for pos, rect in space_rects.items():
+                        if rect.collidepoint(mouse_pos):
+                            sp = game.board.spaces[pos]
+                            if getattr(sp, "type", "") in ("Property", "Railroad", "Utility"):
+                                selected_space = sp
+                            break
+                    if selected_space is not None:
+                        continue  # don't treat as dice click
+
                 if not dice.is_inside_circle(mouse_pos, circ_center, circ_rad):
                     continue
+               
                 player = game.players[player_idx]
                 
                 if player.in_jail:
@@ -166,14 +182,14 @@ def running_display(num_players: int):
                     if not game.pending_purchase:
                         player_idx = (player_idx + 1) % num_players
 
-        # # Give Player 1 the properties at spaces 1, 3, 6, 8 (Mediterranean, Baltic, Oriental, Vermont)
+        # Give Player 1 all properties
         # game.players[0].properties_owned = [game.board.spaces[i] for i in [1, 3, 5, 6, 8, 9, 11, 12, 13, 14, 15, 16, 18, 19, 21, 23, 24, 25, 26, 27, 28, 29, 31, 32, 34, 35, 37, 39]]
         # for prop in game.players[0].properties_owned:
         #     prop.owner = game.players[0]
 
-        board_test.board_game(screen, text_font, board_size, corner_size, space_size)
+        space_rects = board_test.board_game(screen, text_font, board_size, corner_size, space_size)
 
-        ## Make a button 
+        # Make a button 
         dice.make_dice_button(screen, circ_color, circ_center, circ_rad)
 
         board_test.move_player(screen, game.players, board_size, corner_size, space_size)
@@ -199,6 +215,9 @@ def running_display(num_players: int):
          
         if game.pending_purchase:
             draw_purchase_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
+
+        if selected_space is not None:
+            board_test.property_characteristic(screen, selected_space, board_size, screen_height)
 
         pygame.display.flip()
         clock.tick(60)
