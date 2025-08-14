@@ -72,6 +72,61 @@ def draw_purchase_modal(screen, game, title_font, body_font, center_x, center_y)
     screen.blit(buy_lbl, (buy_rect.centerx - buy_lbl.get_width()//2, buy_rect.centery - buy_lbl.get_height()//2))
     screen.blit(skip_lbl, (skip_rect.centerx - skip_lbl.get_width()//2, skip_rect.centery - skip_lbl.get_height()//2))
 
+def draw_rent_modal(screen, game, title_font, body_font, cx, cy):
+    info = game.pending_rent
+    if not info: return
+    p, o, prop, amt = info["player"], info["owner"], info["property"], info["amount"]
+
+    w,h = 360, 200
+    x,y = cx - w//2, cy - h//2
+    pygame.draw.rect(screen, (255,255,224), (x,y,w,h))
+    pygame.draw.rect(screen, (0,0,0), (x,y,w,h), 2)
+
+    t = title_font.render("Rent Due", True, (0,0,0))
+    screen.blit(t, (x+(w-t.get_width())//2, y+10))
+    a = body_font.render(f"{p.name} landed on {prop.name}", True, (0,0,0))
+    b = body_font.render(f"Owes ${amt} to {o.name}", True, (0,0,0))
+    screen.blit(a, (x+20, y+60)); screen.blit(b, (x+20, y+90))
+
+    pay_rect = pygame.Rect(cx-55, cy+30, 110, 44)
+    pygame.draw.rect(screen, (0,120,200), pay_rect)
+    pay_lbl = body_font.render("PAY", True, (255,255,255))
+    screen.blit(pay_lbl, (pay_rect.centerx - pay_lbl.get_width()//2,
+                          pay_rect.centery - pay_lbl.get_height()//2))
+    return pay_rect
+
+def draw_build_modal(screen, game, title_font, body_font, cx, cy):
+    info = game.pending_build
+    if not info: return None, None, None
+    prop = info["property"]; player = info["player"]
+    can_house = info["can_house"]; can_hotel = info["can_hotel"]
+
+    w,h = 420, 240
+    x,y = cx - w//2, cy - h//2
+    pygame.draw.rect(screen, (255,255,224), (x,y,w,h))
+    pygame.draw.rect(screen, (0,0,0), (x,y,w,h), 2)
+
+    t = title_font.render("Build on Your Property?", True, (0,0,0))
+    screen.blit(t, (x+(w-t.get_width())//2, y+10))
+    a = body_font.render(f"{prop.name}", True, (0,0,0))
+    b = body_font.render(f"Houses: {prop.num_houses}  Hotel: {'Yes' if prop.has_hotel else 'No'}", True, (0,0,0))
+    c = body_font.render(f"Cost per build: ${prop.house_cost}", True, (0,0,0))
+    screen.blit(a, (x+20,y+60)); screen.blit(b,(x+20,y+90)); screen.blit(c,(x+20,y+120))
+
+    r_house = pygame.Rect(cx-180, cy+50, 120, 44)
+    r_hotel = pygame.Rect(cx-60,  cy+50, 120, 44)
+    r_skip  = pygame.Rect(cx+60,  cy+50, 120, 44)
+
+    pygame.draw.rect(screen, (0,150,0) if can_house else (120,120,120), r_house)
+    pygame.draw.rect(screen, (150,100,0) if can_hotel else (120,120,120), r_hotel)
+    pygame.draw.rect(screen, (150,0,0), r_skip)
+
+    def center(lbl, rect):
+        screen.blit(lbl, (rect.centerx - lbl.get_width()//2, rect.centery - lbl.get_height()//2))
+    center(body_font.render("BUY HOUSE", True, (255,255,255)), r_house)
+    center(body_font.render("BUY HOTEL", True, (255,255,255)), r_hotel)
+    center(body_font.render("SKIP", True, (255,255,255)), r_skip)
+    return r_house, r_hotel, r_skip
 
 
 
@@ -108,16 +163,49 @@ def running_display(num_players: int):
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 mouse_pos = event.pos
 
-                ## If a purchase is pending, only handle BUY / SKIP clicks
-                          ## If a purchase is pending, only handle BUY / SKIP clicks
+                # If RENT modal is up: only allow PAY
+                if game.pending_rent:
+                    cx, cy = circ_center
+                    pay_rect = pygame.Rect(cx - 55, cy + 30, 110, 44)
+                    if pay_rect.collidepoint(mouse_pos):
+                        info = game.pending_rent
+                        debtor, owner, amount = info["player"], info["owner"], info["amount"]
+                        debtor.pay_money(amount)
+                        owner.collect_money(amount)
+                        game.pending_rent = None
+                        if not is_doubles:
+                            player_idx = (player_idx + 1) % num_players
+                    # block all other clicks while modal is visible
+                    continue
+
+                # If BUILD modal is up: only allow HOUSE / HOTEL / SKIP
+                if game.pending_build:
+                    cx, cy = circ_center
+                    r_house = pygame.Rect(cx - 180, cy + 50, 120, 44)
+                    r_hotel = pygame.Rect(cx - 60,  cy + 50, 120, 44)
+                    r_skip  = pygame.Rect(cx + 60,  cy + 50, 120, 44)
+
+                    can_house = game.pending_build["can_house"]
+                    can_hotel = game.pending_build["can_hotel"]
+
+                    if r_house.collidepoint(mouse_pos) and can_house:
+                        game.confirm_build("house")
+                    elif r_hotel.collidepoint(mouse_pos) and can_hotel:
+                        game.confirm_build("hotel")
+                    elif r_skip.collidepoint(mouse_pos):
+                        game.confirm_build("skip")
+                    # after any choice, end turn (unless doubles rules say otherwise)
+                    if not is_doubles:
+                        player_idx = (player_idx + 1) % num_players
+                    continue
+
+                # If PURCHASE modal is up: only allow BUY / SKIP
                 if game.pending_purchase:
                     buy_rect, skip_rect = purchase_button_rects(circ_center[0], circ_center[1] + 55)
                     affordable = game.pending_purchase.get("affordable", True)
-
                     if buy_rect.collidepoint(mouse_pos):
-                        if affordable:   # ignore clicks if not affordable (greyed out)
+                        if affordable:
                             game.confirm_purchase(True)
-                            # advance turn if no doubles
                             if not is_doubles:
                                 player_idx = (player_idx + 1) % num_players
                     elif skip_rect.collidepoint(mouse_pos):
@@ -125,20 +213,21 @@ def running_display(num_players: int):
                         if not is_doubles:
                             player_idx = (player_idx + 1) % num_players
                     continue
+
+                # No modal showing: only then allow dice click
                 if not dice.is_inside_circle(mouse_pos, circ_center, circ_rad):
                     continue
+
                 player = game.players[player_idx]
-                
+
                 if player.in_jail:
                     game.handle_jail_turn(player)
-                    if not player.in_jail and not game.pending_purchase:
+                    if not player.in_jail and not (game.pending_purchase or game.pending_rent or game.pending_build):
                         player_idx = (player_idx + 1) % num_players
                     continue
 
-                    
                 roll_total, is_doubles = game.dice.roll()
                 rolled = (game.dice.die1_value, game.dice.die2_value)
-
                 player.move(roll_total, game.board)
 
                 if is_doubles:
@@ -151,8 +240,10 @@ def running_display(num_players: int):
                         player_idx = (player_idx + 1) % num_players
                 else:
                     player.doubles_rolled_consecutive = 0
-                    if not game.pending_purchase:
+                    # only auto-advance if no modal popped up from the move
+                    if not (game.pending_purchase or game.pending_rent or game.pending_build):
                         player_idx = (player_idx + 1) % num_players
+
 
         board_test.board_game(screen, text_font, board_size, corner_size, space_size)
 
@@ -174,12 +265,19 @@ def running_display(num_players: int):
                 doubles_text = value_font.render("You rolled doubles!", True, (0, 0, 0))
                 screen.blit(doubles_text, (circ_center[0] - doubles_text.get_width()//2, circ_center[1] - 300)) # 100
 
-            if len(doubles_rolled) >= 3:
+            if is_doubles and game.players[player_idx].doubles_rolled_consecutive == 3:
                 jail_text = value_font.render("Too Many Doubles Rolled, Go To Jail", True, (255, 0, 0))
-                screen.blit(jail_text, (circ_center[0] - jail_text.get_width()//2, circ_center[1] - 250))    # 150
+                screen.blit(jail_text, (circ_center[0] - jail_text.get_width()//2, circ_center[1] - 250))
+
          
         if game.pending_purchase:
             draw_purchase_modal(screen, game, value_font, text_font, circ_center[0], circ_center[1])
+
+        if game.pending_rent: 
+            draw_rent_modal(screen, game, value_font, text_font, circ_center[0], circ_center[1])
+
+        if game.pending_build:
+            draw_build_modal(screen, game, value_font, text_font, circ_center[0], circ_center[1])
 
         pygame.display.flip()
         clock.tick(60)
