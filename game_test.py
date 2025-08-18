@@ -204,14 +204,78 @@ class Property(Space):
             player_owns_monopoly = self.owner.has_monopoly(self.color_group, board)
             rent_amount = self.calculate_rent(player_owns_monopoly)
             if rent_amount > 0:
+                board.game.pending_rent = {
+                    "player": player,
+                    "owner": self.owner,
+                    "property": self,
+                    "amount": rent_amount
+                }
+                
                 print(f"  {player.name} landed on {self.name} (owned by {self.owner.name}) and pays ${rent_amount} rent.")
-                player.pay_money(rent_amount)
-                self.owner.collect_money(rent_amount)
+                # player.pay_money(rent_amount)
+                # self.owner.collect_money(rent_amount)
             else:
                 print(f"  {self.name} is mortgaged, no rent due.")
+            return 
 
         else:
             print(f"  {player.name} landed on their own property, {self.name}.")
+            can_house, _ = self.can_build_house(player, board)
+            can_hotel, _ = self.can_build_hotel(player, board)
+            if can_house or can_hotel:
+                board.game.pending_build = {
+                    "player": player,
+                    "property": self,
+                    "can_house": can_house,
+                    "can_hotel": can_hotel,
+                    "cost": self.house_cost,
+                }
+
+    def group_mates(self, board):
+        """All properties in my color group (including me)."""
+        return [s for s in board.spaces
+                if isinstance(s, Property) and s.color_group == self.color_group]
+    
+    def can_build_house(self, owner, board):
+        if self.owner != owner: return (False, "Not owner")
+        if self.is_mortgaged: return (False, "Mortgaged")
+        if self.has_hotel: return (False, "Already a hotel")
+        if not owner.has_monopoly(self.color_group, board):
+            return(False, "Need monpoly")
+        
+        group = self.group_mates(board)
+        no_hotel = [p for p in group if not p.has_hotel]
+        min_houses = min((p.num_houses for p in no_hotel), default=4)
+        if self.num_houses > min_houses:
+            return (False, "Build evenly across the set")
+        if self.num_houses >= 4:
+            return (False, "Already 4 houses (buy hotel instead)")
+        if owner.money < self.house_cost:
+            return(False, "Not enough cash")
+        return (True, "")
+    
+    def can_build_hotel(self, owner, board):
+        if self.owner != owner: return (False, "Not owner")
+        if self.is_mortgaged: return (False, "Mortgaged")
+        if self.has_hotel: return (False, "Already a hotel")
+        if not owner.has_monopoly(self.color_group, board):
+            return (False, "Need monopoly")
+        if self.num_houses < 4:
+            return (False, "Need 4 houses here first")
+        if owner.money < self.house_cost:
+            return (False, "Not enough cash")
+        return (True, "")
+    
+    def build_house(self, owner):
+        owner.pay_money(self.house_cost)
+        self.num_houses += 1
+        print(f"{owner.name} built a house on {self.name} (now {self.num_houses}).")
+    
+    def build_hotel(self, owner):
+        owner.pay_money(self.house_cost)
+        self.num_houses = 0
+        self.has_hotel = True
+        print(f"{owner.name} built a HOTEL on {self.name}.")
 
 class Railroad(Space):
     """Represents a Railroad property."""
@@ -464,6 +528,8 @@ class Game:
         self.pending_purchase = None
         self.last_drawn_card = None
         self.pending_card = None
+        self.pending_build = None
+        self.pending_rent = None
 
         # Shuffle cards
         random.shuffle(self.chance_cards)
@@ -519,6 +585,28 @@ class Game:
             print(f"{player.name} skipped buying {prop.name}.")
 
         self.pending_purchase = None
+
+    
+
+
+    def confirm_build(self, action: str):
+        """
+        action: 'house' | 'hotel' | 'skip'
+        """
+        info = getattr(self, "pending_build", None)
+        if not info: return
+        player = info["player"]
+        prop   = info["property"]
+
+        if action == "house" and info["can_house"]:
+            prop.build_house(player)
+
+        elif action == "hotel" and info["can_hotel"]:
+            prop.build_hotel(player)
+
+        else:
+            print(f"{player.name} skipped building on {prop.name}.")
+        self.pending_build = None
 
 
     def start_game(self):
