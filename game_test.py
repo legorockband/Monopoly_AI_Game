@@ -582,6 +582,57 @@ class Game:
 
         return cards
 
+    def _transfer_property(self, prop, giver, receiver):
+        """Move prop from giver to receiver, keeping houses/hotel state intact."""
+        if prop in giver.properties_owned:
+            giver.properties_owned.remove(prop)
+            receiver.properties_owned.append(prop)
+            prop.owner = receiver
+    
+    def execute_trade(self, p_left, p_right, offer_left, offer_right):
+        """
+        offer_left/right: dict like {"cash":int, "gojf":int, "props": list[Space]}
+        Deduct/add cash, transfer GOJF, and move property titles.
+        Returns (ok:bool, msg:str)
+        """
+        # Basic validations (cash/gojf availability, ownership)
+        if offer_left["cash"] > p_left.money or offer_right["cash"] > p_right.money:
+            return False, "One side doesn't have enough cash."
+
+        if offer_left["gojf"] > p_left.get_out_of_jail_free_cards or offer_right["gojf"] > p_right.get_out_of_jail_free_cards:
+            return False, "One side doesn't have enough Get Out of Jail Free cards."
+
+        for sp in offer_left["props"]:
+            if getattr(sp, "owner", None) != p_left:
+                return False, f"{p_left.name} does not own {getattr(sp,'name','a property')}."
+        for sp in offer_right["props"]:
+            if getattr(sp, "owner", None) != p_right:
+                return False, f"{p_right.name} does not own {getattr(sp,'name','a property')}."
+
+        # Cash
+        if offer_left["cash"] > 0:
+            p_left.pay_money(offer_left["cash"])
+            p_right.collect_money(offer_left["cash"])
+        if offer_right["cash"] > 0:
+            p_right.pay_money(offer_right["cash"])
+            p_left.collect_money(offer_right["cash"])
+
+        # GOJF cards
+        if offer_left["gojf"] > 0:
+            p_left.get_out_of_jail_free_cards  -= offer_left["gojf"]
+            p_right.get_out_of_jail_free_cards += offer_left["gojf"]
+        if offer_right["gojf"] > 0:
+            p_right.get_out_of_jail_free_cards -= offer_right["gojf"]
+            p_left.get_out_of_jail_free_cards  += offer_right["gojf"]
+
+        # Properties
+        for sp in list(offer_left["props"]):
+            self._transfer_property(sp, p_left, p_right)
+        for sp in list(offer_right["props"]):
+            self._transfer_property(sp, p_right, p_left)
+
+        return True, "Trade complete."
+
     def confirm_purchase(self, accept: bool):
         """Finalize a pending purchase (called from UI)."""
         if not self.pending_purchase:

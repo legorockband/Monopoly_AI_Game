@@ -52,6 +52,16 @@ def running_display(num_players: int):
     player_idx = 0
     selected_space = None
 
+    trade_select_open = False         # player picker modal
+    trade_selected = set()            # set of two indices
+    trade_edit_open = False           # editor modal
+    trade_editor_rects = None
+    trade_offer = {
+        "left":  {"cash": 0, "gojf": 0, "props": set()},  # store prop ids here; resolve to objects on confirm
+        "right": {"cash": 0, "gojf": 0, "props": set()},
+    }
+    trade_pair = None  # (left_idx, right_idx) when editing/confirming
+
     def can_end_turn():
         # Check if you didn't roll doubles or in a popup menu
         return has_rolled and (not is_doubles) and not (game.pending_build or game.pending_rent or game.pending_purchase or game.last_drawn_card)
@@ -167,6 +177,97 @@ def running_display(num_players: int):
                     if selected_space is not None:
                         continue  # don't treat as dice click
            
+                # --- TRADE: editor modal blocks everything ---
+                if trade_edit_open and trade_pair is not None:
+                    cx, cy = board_center
+                    iL, iR = trade_pair
+                    pL, pR = game.players[iL], game.players[iR]
+                    rects = trade_editor_rects or {}
+
+                    def adjust(side, key, delta, max_val=None):
+                        if key == "cash":
+                            trade_offer[side]["cash"] = max(0, trade_offer[side]["cash"] + delta)
+                        elif key == "gojf":
+                            cap = max_val if max_val is not None else 0
+                            newv = trade_offer[side]["gojf"] + delta
+                            newv = max(0, min(cap, newv))
+                            trade_offer[side]["gojf"] = newv
+
+                    # Cash/GOJF controls
+                    if rects["left_cash_minus"].collidepoint(mouse_pos):  adjust("left",  "cash", -10)
+                    elif rects["left_cash_plus"].collidepoint(mouse_pos): adjust("left",  "cash", +10)
+                    elif rects["right_cash_minus"].collidepoint(mouse_pos):adjust("right", "cash", -10)
+                    elif rects["right_cash_plus"].collidepoint(mouse_pos): adjust("right", "cash", +10)
+                    elif rects["left_gojf_minus"].collidepoint(mouse_pos): adjust("left",  "gojf", -1, pL.get_out_of_jail_free_cards)
+                    elif rects["left_gojf_plus"].collidepoint(mouse_pos):  adjust("left",  "gojf", +1, pL.get_out_of_jail_free_cards)
+                    elif rects["right_gojf_minus"].collidepoint(mouse_pos):adjust("right", "gojf", -1, pR.get_out_of_jail_free_cards)
+                    elif rects["right_gojf_plus"].collidepoint(mouse_pos): adjust("right", "gojf", +1, pR.get_out_of_jail_free_cards)
+
+                    # Property checkboxes: look for any key starting with "box_"
+                    else:
+                        clicked_box = None
+                        for key, r in rects.items():
+                            if (key.startswith("hit_") or key.startswith("box_")) and r.collidepoint(mouse_pos):
+                                clicked_box = key; break
+                        if clicked_box:
+                            _, side, pid_str = clicked_box.split("_", 2)
+                            pid = int(pid_str)
+                            s = trade_offer[side]["props"]
+                            if pid in s: s.remove(pid)
+                            else: s.add(pid)
+                        elif rects["confirm"].collidepoint(mouse_pos):
+                            # Build concrete offers using id->object resolution
+                            left_props  = [sp for sp in game.players[iL].properties_owned if id(sp) in trade_offer["left"]["props"]]
+                            right_props = [sp for sp in game.players[iR].properties_owned if id(sp) in trade_offer["right"]["props"]]
+                            ok, msg = game.execute_trade(
+                                game.players[iL], game.players[iR],
+                                {"cash": trade_offer["left"]["cash"],  "gojf": trade_offer["left"]["gojf"],  "props": left_props},
+                                {"cash": trade_offer["right"]["cash"], "gojf": trade_offer["right"]["gojf"], "props": right_props},
+                            )
+                            print(msg)
+                            # Reset UI regardless; if failed, user can re-open and try again.
+                            trade_editor_rects = None
+                            trade_edit_open = False
+                            trade_pair = None
+                            trade_selected.clear()
+                            trade_offer = {"left":{"cash":0,"gojf":0,"props":set()}, "right":{"cash":0,"gojf":0,"props":set()}}
+                        elif rects["cancel"].collidepoint(mouse_pos):
+                            trade_edit_open = False
+                            trade_pair = None
+                            trade_selected.clear()
+                            trade_offer = {"left":{"cash":0,"gojf":0,"props":set()}, "right":{"cash":0,"gojf":0,"props":set()}}
+                            trade_editor_rects = None
+                    continue  # block all other clicks while editor is open
+
+                # --- TRADE: selection modal blocks everything ---
+                if trade_select_open:
+                    cx, cy = board_center
+                    btn_rects, confirm_rect, cancel_rect = board_test.draw_trade_select_modal(
+                        screen, game.players, trade_selected, cx, cy
+                    )
+                    for i, r in enumerate(btn_rects):
+                        if r.collidepoint(mouse_pos):
+                            if i in trade_selected: trade_selected.remove(i)
+                            else:
+                                if len(trade_selected) < 2: trade_selected.add(i)
+                            break
+                    else:
+                        if confirm_rect.collidepoint(mouse_pos) and len(trade_selected) == 2:
+                            iL, iR = sorted(list(trade_selected))
+                            trade_pair = (iL, iR)
+                            trade_edit_open = True
+                            trade_select_open = False
+                        elif cancel_rect.collidepoint(mouse_pos):
+                            trade_select_open = False
+                            trade_selected.clear()
+                    continue  # block others while selection is open
+
+                # --- Trade button click (only when no other modals are up) ---
+                if trade_rect and trade_rect.collidepoint(mouse_pos):
+                    trade_select_open = True
+                    trade_selected.clear()
+                    continue
+
                 # End Turn button click
                 if end_rect and end_rect.collidepoint(mouse_pos):
                     if can_end_turn():
@@ -192,7 +293,6 @@ def running_display(num_players: int):
                     roll_total, is_doubles = game.dice.roll()
                     has_rolled = True
                     rolled = (game.dice.die1_value, game.dice.die2_value)
-                    roll_total = 7
                     player.move(roll_total, game.board)
 
                 # What the do if there are doubles 
@@ -222,12 +322,13 @@ def running_display(num_players: int):
         # Make interactable buttons
         dice.make_dice_button(screen, circ_color, circ_center, circ_rad, enable=(not has_rolled or is_doubles))
         end_rect = board_test.end_turn_button(screen, value_font, circ_center, enable=can_end_turn())
+        trade_rect = board_test.trade_button(screen, value_font, circ_center, enable=True)                
 
         # Draw the houses or hotels 
         board_test.draw_property_build_badges(screen, game, space_rects)
 
         board_test.move_player(screen, game.players, board_size, corner_size, space_size)
-
+        
         # Show the player stats
         player_cards.create_player_card(screen, game.players, player_idx, board_size, space_size, screen_width, screen_height)
 
@@ -267,6 +368,21 @@ def running_display(num_players: int):
         elif selected_space is not None:
             board_test.property_characteristic(screen, selected_space, board_size, screen_height)
         
+        if trade_select_open:
+            board_test.draw_trade_select_modal(screen, game.players, trade_selected, board_center[0], board_center[1])
+
+        if trade_edit_open and trade_pair is not None:
+            iL, iR = trade_pair
+            trade_editor_rects = board_test.draw_trade_editor_modal(
+                screen,
+                game.players[iL], game.players[iR],
+                trade_offer,
+                board_center[0], board_center[1]
+            )
+        else:
+            # Ensure stale rects are cleared when the editor closes
+            trade_editor_rects = None
+
         pygame.display.flip()
         clock.tick(60)
 

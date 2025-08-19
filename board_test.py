@@ -1,7 +1,17 @@
 #board.py
 # reference link : https://www.pygame.org/docs/
 import pygame
-from game_test import Game
+from game_test import Property, Railroad, Utility
+
+def _trade_sort_key(s):
+    # Properties first (grouped by board order), then Railroads, then Utilities
+    t = 0 if isinstance(s, Property) else 1 if isinstance(s, Railroad) else 2
+    return (t, getattr(s, "index", 999))
+
+def _trade_prop_text_color(space):
+    if isinstance(space, Property):
+        return getattr(space, "color_group", (0,0,0))
+    return (30, 30, 30)
 
 spaces_names = [
     "MEDITERRANEAN AVENUE", "COMMUNITY CHEST", "BALTIC AVENUE", "INCOME TAX", "READING RAILROAD", "ORIENTAL AVENUE", "CHANCE", "VERTMONT AVENUE", "CONNETICUT AVENUE", 
@@ -599,6 +609,268 @@ def draw_jail_modal(screen, game, title_font, body_font, cx, cy):
                          ok_rect.centery - ok_lbl.get_height()//2))
     return ok_rect
 
+def trade_button(screen, value_font, center_pos, enable=True):
+    """Draw a 'Trade' button directly ABOVE End Turn and return its rect."""
+    cx, cy = center_pos
+    cx = cx + 140
+    # End Turn is +30; its height is 50. Put Trade one height (50) above with a tidy gap.
+    cy = cy - 30
+    w, h = 140, 50
+    r = pygame.Rect(cx, cy, w, h)
+    color = (0, 120, 200) if enable else (160,160,160)
+    pygame.draw.rect(screen, color, r)
+    lbl = value_font.render("Trade", True, (0,0,0))
+    screen.blit(lbl, (r.centerx - lbl.get_width()//2, r.centery - lbl.get_height()//2))
+    return r
+
+def draw_trade_select_modal(screen, players, selected_idxs, cx, cy):
+    """
+    Modal: choose exactly two players.
+    selected_idxs: set[int] (mutated by caller based on clicks)
+    Returns (player_btn_rects:list[Rect], confirm_rect:Rect, cancel_rect:Rect)
+    """
+    title_font = pygame.font.SysFont("Arial", 24, bold=True)
+    body_font  = pygame.font.SysFont(None, 22)
+
+    w, h = 460, 320
+    x, y = cx - w//2, cy - h//2
+    pygame.draw.rect(screen, (255,255,224), (x,y,w,h))
+    pygame.draw.rect(screen, (0,0,0), (x,y,w,h), 2)
+
+    t = title_font.render("Choose 2 Players to Trade", True, (0,0,0))
+    screen.blit(t, (x + (w - t.get_width())//2, y + 12))
+
+    btn_rects = []
+    bx, by = x + 20, y + 60
+    bw, bh = 190, 42
+    gap_x, gap_y = 20, 14
+    per_row = 2
+
+    for i, p in enumerate(players):
+        col = i % per_row
+        row = i // per_row
+        rx = bx + col*(bw + gap_x)
+        ry = by + row*(bh + gap_y)
+        r = pygame.Rect(rx, ry, bw, bh)
+        active = (i in selected_idxs)
+        fill = (0,180,120) if active else (220,220,220)
+        pygame.draw.rect(screen, fill, r, border_radius=10)
+        pygame.draw.rect(screen, (0,0,0), r, 2, border_radius=10)
+        name = body_font.render(p.name, True, getattr(p, "color", (0,0,0)))
+        screen.blit(name, (r.centerx - name.get_width()//2, r.centery - name.get_height()//2))
+        btn_rects.append(r)
+
+    confirm_enabled = (len(selected_idxs) == 2)
+    confirm_rect = pygame.Rect(x + w - 140 - 20, y + h - 50 - 16, 140, 50)
+    cancel_rect  = pygame.Rect(x + 20, y + h - 50 - 16, 140, 50)
+
+    pygame.draw.rect(screen, (0,150,0) if confirm_enabled else (150,150,150), confirm_rect)
+    pygame.draw.rect(screen, (150,0,0), cancel_rect)
+    c1 = body_font.render("CONFIRM", True, (255,255,255))
+    c2 = body_font.render("CANCEL",  True, (255,255,255))
+    screen.blit(c1, (confirm_rect.centerx - c1.get_width()//2, confirm_rect.centery - c1.get_height()//2))
+    screen.blit(c2, (cancel_rect.centerx  - c2.get_width()//2,  cancel_rect.centery  - c2.get_height()//2))
+    return btn_rects, confirm_rect, cancel_rect
+
+def draw_trade_editor_modal(screen, p_left, p_right, offer, cx, cy):
+    """
+    Modal: pick items to trade and confirm.
+    p_left, p_right: Player
+    offer = {
+        "left": {"cash": int, "gojf": int, "props": set()},   # props holds object ids
+        "right":{"cash": int, "gojf": int, "props": set()},
+    }
+    Returns dict of rects for click handling.
+    """
+    rects = {}
+    # Modal shell
+    W, H = 740, 460
+    x, y = cx - W//2, cy - H//2
+    pygame.draw.rect(screen, (255,255,224), (x, y, W, H))
+    pygame.draw.rect(screen, (0,0,0), (x, y, W, H), 2)
+
+    title_font = pygame.font.SysFont("Arial", 24, bold=True)
+    body_font  = pygame.font.SysFont(None, 22)
+
+    # Headers
+    title = title_font.render("Trade", True, (0,0,0))
+    screen.blit(title, (x + (W - title.get_width())//2, y + 10))
+
+    # Columns
+    col_w = (W - 60) // 2
+    left_x  = x + 20
+    right_x = x + 40 + col_w
+    top_y   = y + 50
+
+    # CASH & GOJF controls
+    def draw_cash_gojf(side, player, col_x):
+        # Cash row
+        cash_y = top_y
+        gap = 30
+        dx = 120
+        cash_lbl = body_font.render(f"Cash: ${offer[side]['cash']}", True, (0,0,0))
+        screen.blit(cash_lbl, (col_x, cash_y))
+        minus = pygame.Rect(col_x + dx, cash_y - 4, 26, 26)
+        plus  = pygame.Rect(col_x + dx + gap, cash_y - 4, 26, 26)
+        pygame.draw.rect(screen, (200,200,200), minus); pygame.draw.rect(screen, (0,0,0), minus, 2)
+        pygame.draw.rect(screen, (200,200,200), plus);  pygame.draw.rect(screen, (0,0,0), plus,  2)
+        m = body_font.render("-", True, (0,0,0)); p = body_font.render("+", True, (0,0,0))
+        screen.blit(m, (minus.centerx - m.get_width()//2, minus.centery - m.get_height()//2))
+        screen.blit(p, (plus.centerx  - p.get_width()//2,  plus.centery  - p.get_height()//2))
+        rects[f"{side}_cash_minus"] = minus
+        rects[f"{side}_cash_plus"]  = plus
+
+        # GOJF row
+        gojf_y = cash_y + 34
+        gojf_dx = 230
+        gojf_lbl = body_font.render(f"Get Out of Jail Free: {offer[side]['gojf']}/{player.get_out_of_jail_free_cards}", True, (0,0,0))
+        screen.blit(gojf_lbl, (col_x, gojf_y))
+        minus = pygame.Rect(col_x + gojf_dx, gojf_y - 4, 26, 26)
+        plus  = pygame.Rect(col_x + gojf_dx + gap, gojf_y - 4, 26, 26)
+        pygame.draw.rect(screen, (200,200,200), minus); pygame.draw.rect(screen, (0,0,0), minus, 2)
+        pygame.draw.rect(screen, (200,200,200), plus);  pygame.draw.rect(screen, (0,0,0), plus,  2)
+        m = body_font.render("-", True, (0,0,0)); p = body_font.render("+", True, (0,0,0))
+        screen.blit(m, (minus.centerx - m.get_width()//2, minus.centery - m.get_height()//2))
+        screen.blit(p, (plus.centerx  - p.get_width()//2,  plus.centery  - p.get_height()//2))
+        rects[f"{side}_gojf_minus"] = minus
+        rects[f"{side}_gojf_plus"]  = plus
+
+        return gojf_y + 40  # content y after controls
+
+    content_top_left  = draw_cash_gojf("left",  p_left,  left_x)
+    content_top_right = draw_cash_gojf("right", p_right, right_x)
+
+    # Properties grid per side, wraps into columns within the side panel
+    def draw_prop_grid(side, player, col_x, start_y):
+        # List properties by their board position to keep a stable UI order
+        props = list(player.properties_owned)
+        # Some spaces might not be tradable; filter by having a 'name'
+        props = [sp for sp in props if hasattr(sp, "name")]
+        # prop_color = props.
+        props.sort(key=lambda sp: getattr(sp, "position", getattr(sp, "board_position", 0)))
+
+        row_h = 24
+        # Area for properties: from start_y to (y + H - 90) to leave room for confirm/cancel
+        list_top = start_y
+        list_bottom = y + H - 90
+        avail_h = max(0, list_bottom - list_top)
+        max_rows = max(10, avail_h // row_h)  # at least 10 rows to keep density reasonable
+        if max_rows <= 0:
+            max_rows = 10
+
+        # Determine number of columns to fit all props within the side panel
+        import math
+        n = len(props)
+        num_cols = max(1, math.ceil(n / max_rows))
+        # Column width inside side panel
+        gap_x = 10
+        per_col_w = (col_w - (num_cols - 1) * gap_x)
+        if num_cols > 0:
+            per_col_w //= num_cols
+        # Clamp to minimum width
+        per_col_w = max(90, per_col_w)
+
+        def trunc(text, max_px):
+            # truncate text to fit in max_px using the current font
+            if body_font.size(text)[0] <= max_px:
+                return text
+            s = text
+            ell = "..."
+            while s and body_font.size(s + ell)[0] > max_px:
+                s = s[:-1]
+            return s + ell if s else ell
+
+        for idx, sp in enumerate(props):
+            col = idx // max_rows
+            row = idx % max_rows
+            base_x = col_x + col * (per_col_w + gap_x)
+            base_y = list_top + row * row_h
+            # Small checkbox (visual)
+            box = pygame.Rect(base_x, base_y + 3, 16, 16)
+            pygame.draw.rect(screen, (255,255,255), box); pygame.draw.rect(screen, (0,0,0), box, 2)
+
+            pid = id(sp)
+            is_checked = pid in offer[side]["props"]
+            if is_checked:
+                # draw a cross
+                pygame.draw.line(screen, (0,0,0), (box.left+3, box.top+3), (box.right-3, box.bottom-3), 2)
+                pygame.draw.line(screen, (0,0,0), (box.left+3, box.bottom-3), (box.right-3, box.top+3), 2)
+
+            # Text label
+            color = getattr(sp, "color_group", (0,0,0))
+            name_txt = trunc(sp.name, per_col_w - 28)
+            lbl = body_font.render(name_txt, True, color)
+            screen.blit(lbl, (box.right + 6, base_y))
+
+            # Hit area covers box + text row for easy clicking
+            hit = pygame.Rect(base_x, base_y, per_col_w, row_h)
+            # pygame.draw.rect(screen, (0,0,0), hit, 2)
+            rects[f"box_{side}_{pid}"] = box
+            rects[f"hit_{side}_{pid}"] = hit
+
+        # Title
+        t = title_font.render(f"{player.name}'s items", True, (0,0,0))
+        screen.blit(t, (col_x, start_y - 30))
+
+    draw_prop_grid("left",  p_left,  left_x,  content_top_left)
+    draw_prop_grid("right", p_right, right_x, content_top_right)
+
+    # --- Valuation summary (cash + GOJF*100 + sum(property.cost)) ---
+    GOJF_VALUE = 100
+
+    def selected_props_for(side, player):
+        ids = offer[side]["props"]
+        return [sp for sp in player.properties_owned if id(sp) in ids]
+
+    def prop_value(sp):
+        # Properties, Railroads, and Utilities all have a .cost in your model:contentReference[oaicite:1]{index=1}
+        return getattr(sp, "cost", 0)
+
+    def side_value(side, player):
+        cash = offer[side]["cash"]
+        gojf = offer[side]["gojf"] * GOJF_VALUE
+        props = sum(prop_value(sp) for sp in selected_props_for(side, player))
+        return cash + gojf + props
+
+    left_total  = side_value("left",  p_left)
+    right_total = side_value("right", p_right)
+    delta = right_total - left_total  # positive => better for RIGHT, negative => better for LEFT
+
+    # Labels under each column
+    total_font = pygame.font.SysFont("Arial", 22, bold=True)
+    small_font = pygame.font.SysFont(None, 16)
+
+    def draw_total(col_x, who, total):
+        lbl1 = total_font.render(f"{who.name} offer value:", True, (0,0,0))
+        lbl2 = total_font.render(f"${total}", True, (0,0,0))
+        y_line = y + H - 100
+        screen.blit(lbl1, (col_x, y_line))
+        screen.blit(lbl2, (col_x, y_line + 26))
+        note = small_font.render("(Cash + Property cost + GOJF)", True, (60,60,60))
+        screen.blit(note, (col_x, y_line + 52))
+
+    draw_total(left_x,  p_left,  left_total)
+    draw_total(right_x + 175, p_right, right_total)
+
+    # Centered net indicator between columns
+    net_text = f"Net to Right: ${delta}" if delta != 0 else "Even trade"
+    net_color = (0,140,0) if delta > 0 else ((180,0,0) if delta < 0 else (20,20,20))
+    net_lbl = total_font.render(net_text, True, net_color)
+    screen.blit(net_lbl, (x + (W - net_lbl.get_width())//2, y + H - 140))
+
+    # Confirm / Cancel
+    confirm_rect = pygame.Rect(x + W//2 + 10, y + H - 70, 160, 50)
+    cancel_rect  = pygame.Rect(x + W//2 - 170, y + H - 70, 160, 50)
+    pygame.draw.rect(screen, (0,150,0), confirm_rect); pygame.draw.rect(screen, (0,0,0), confirm_rect, 2)
+    pygame.draw.rect(screen, (150,0,0), cancel_rect);  pygame.draw.rect(screen, (0,0,0), cancel_rect,  2)
+    c1 = title_font.render("CONFIRM", True, (255,255,255))
+    c2 = title_font.render("CANCEL",  True, (255,255,255))
+    screen.blit(c1, (confirm_rect.centerx - c1.get_width()//2, confirm_rect.centery - c1.get_height()//2))
+    screen.blit(c2, (cancel_rect.centerx  - c2.get_width()//2,  cancel_rect.centery  - c2.get_height()//2))
+    rects["confirm"] = confirm_rect
+    rects["cancel"]  = cancel_rect
+    return rects
+
 def draw_property_build_badges(screen:pygame.Surface, game, space_rects):
     import pygame
     GREEN = (0, 180, 0)   # houses
@@ -705,6 +977,7 @@ def end_turn_button(screen:pygame.Surface, value_font, center_pos:tuple[int, int
     cx,cy = center_pos
     # Position for the rectangle
     cx = cx + 140
+    cy = cy + 30
     width = 140
     height = 50 
     end_rect = pygame.Rect(cx, cy, width, height)
@@ -713,7 +986,4 @@ def end_turn_button(screen:pygame.Surface, value_font, center_pos:tuple[int, int
     end_turn_text = value_font.render("End Turn", True, (0,0,0))
     screen.blit(end_turn_text, (cx + (width - end_turn_text.get_width())//2, cy + (height - end_turn_text.get_height())//2))
     return end_rect
-
-
-
 
