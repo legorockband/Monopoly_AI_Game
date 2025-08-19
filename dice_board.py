@@ -96,6 +96,14 @@ def running_display(num_players: int):
                     # block all other clicks while modal is visible
                     continue
 
+                # Tax
+                if game.pending_tax:
+                    cx, cy = board_center
+                    pay_rect = pygame.Rect(cx - 55, cy + 30, 110, 44)
+                    if pay_rect.collidepoint(mouse_pos):
+                        game.confirm_tax()
+                    continue
+
                 # If BUILD modal is up: only allow HOUSE / HOTEL / SKIP
                 if game.pending_build:
                     cx, cy = board_center
@@ -170,8 +178,13 @@ def running_display(num_players: int):
                     roll_total, is_doubles = game.dice.roll()
                     has_rolled = True
                     rolled = (game.dice.die1_value, game.dice.die2_value)
+                    roll_total = 30
                     player.move(roll_total, game.board)
-                
+
+                    sp = game.board.spaces[player.position]
+                    if getattr(sp, "type", "") == "GoToJail":
+                        board_test.jail_tax_display(screen, player, sp, board_size, screen_height)
+
                 # What the do if there are doubles 
                 if is_doubles:
                     player.doubles_rolled_consecutive += 1
@@ -235,6 +248,9 @@ def running_display(num_players: int):
 
         elif game.pending_build:
             board_test.draw_build_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
+
+        elif game.pending_tax:
+            board_test.draw_tax_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
         elif selected_space is not None:
             board_test.property_characteristic(screen, selected_space, board_size, screen_height)

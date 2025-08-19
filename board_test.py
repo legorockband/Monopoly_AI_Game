@@ -291,8 +291,7 @@ def layout_offsets(n:int, orientation:str, token_size:int=26, gap:int=6):
                 (-token_size - gap, -half - gap//2), (-token_size - gap,  half + gap//2)]
     return base[:max(1, n)]
 
-
-def move_player(screen, players, board_size:int, corner_size:int, space_size:int):
+def move_player(screen:pygame.Surface, players, board_size:int, corner_size:int, space_size:int):
     """
     Draw player tokens so that when multiple players share a tile:
       - bottom/top rows: tokens sit left/right of each other
@@ -326,9 +325,7 @@ def move_player(screen, players, board_size:int, corner_size:int, space_size:int
             # optional thin border for visibility
             pygame.draw.rect(screen, (0,0,0), (x, y, TOKEN, TOKEN), 1)
 
-
-
-def display_card(screen, current_player, card, board_size, screen_height):
+def display_card(screen:pygame.Surface, current_player, card, board_size, screen_height):
     card_width = 200
     card_height = 250
     card_x = board_size // 2 - card_width // 2
@@ -372,9 +369,8 @@ def wrap_text(text, font, max_width):
     
     return lines
 
-def property_characteristic(screen, space, board_size, screen_height):
-    ## When click on a property create a simple card display to show the rent and cost of houses/hotels etc
-    
+def property_characteristic(screen:pygame.Surface, space, board_size, screen_height):
+    # When click on a property create a simple card display to show the rent and cost of houses/hotels etc
     card_width = 360
     card_height = 420
     card_x = board_size // 2 - card_width // 2
@@ -461,7 +457,7 @@ def purchase_button_rects(cx, cy):
     skip = pygame.Rect(cx + gap//2, cy - h//2, w, h)
     return buy, skip
 
-def draw_purchase_modal(screen, game, title_font, body_font, center_x, center_y):
+def draw_purchase_modal(screen:pygame.Surface, game, title_font, body_font, center_x, center_y):
     info = game.pending_purchase
     if not info:
         return
@@ -499,7 +495,7 @@ def draw_purchase_modal(screen, game, title_font, body_font, center_x, center_y)
     screen.blit(buy_lbl, (buy_rect.centerx - buy_lbl.get_width()//2, buy_rect.centery - buy_lbl.get_height()//2))
     screen.blit(skip_lbl, (skip_rect.centerx - skip_lbl.get_width()//2, skip_rect.centery - skip_lbl.get_height()//2))
 
-def draw_rent_modal(screen, game, title_font, body_font, cx, cy):
+def draw_rent_modal(screen:pygame.Surface, game, title_font, body_font, cx, cy):
     info = game.pending_rent
     if not info: return
     p, o, prop, amt = info["player"], info["owner"], info["property"], info["amount"]
@@ -522,7 +518,7 @@ def draw_rent_modal(screen, game, title_font, body_font, cx, cy):
                           pay_rect.centery - pay_lbl.get_height()//2))
     return pay_rect
 
-def draw_build_modal(screen, game, title_font, body_font, cx, cy):
+def draw_build_modal(screen:pygame.Surface, game, title_font, body_font, cx, cy):
     info = game.pending_build
     if not info: return None, None, None
     prop = info["property"]; player = info["player"]
@@ -558,7 +554,29 @@ def draw_build_modal(screen, game, title_font, body_font, cx, cy):
     center(body_font.render("SKIP", True, (255,255,255)), r_skip)
     return r_house, r_hotel, r_skip
 
-def draw_property_build_badges(screen, game, space_rects):
+def draw_tax_modal(screen:pygame.Surface, game, title_font, body_font, cx, cy):
+    info = game.pending_tax
+    if not info: return None
+    p = info["player"]; amt = info["amount"]; name = info.get("name", "Tax")
+
+    w,h = 360, 180
+    x,y = cx - w//2, cy - h//2
+    pygame.draw.rect(screen, (255,255,224), (x,y,w,h))
+    pygame.draw.rect(screen, (0,0,0), (x,y,w,h), 2)
+
+    t = title_font.render(f"{name}", True, (0,0,0))
+    a = body_font.render(f"{p.name} must pay ${amt}", True, (0,0,0))
+    screen.blit(t, (x+(w-t.get_width())//2, y+10))
+    screen.blit(a, (x+20, y+60))
+
+    pay_rect = pygame.Rect(cx-55, cy+30, 110, 44)
+    pygame.draw.rect(screen, (0,120,200), pay_rect)
+    pay_lbl = body_font.render("PAY", True, (255,255,255))
+    screen.blit(pay_lbl, (pay_rect.centerx - pay_lbl.get_width()//2,
+                          pay_rect.centery - pay_lbl.get_height()//2))
+    return pay_rect
+
+def draw_property_build_badges(screen:pygame.Surface, game, space_rects):
     import pygame
     GREEN = (0, 180, 0)   # houses
     RED   = (220, 40, 40) # hotels
@@ -672,3 +690,29 @@ def end_turn_button(screen:pygame.Surface, value_font, center_pos:tuple[int, int
     end_turn_text = value_font.render("End Turn", True, (0,0,0))
     screen.blit(end_turn_text, (cx + (width - end_turn_text.get_width())//2, cy + (height - end_turn_text.get_height())//2))
     return end_rect
+
+def jail_tax_display(screen:pygame.Surface, current_player, space, board_size, screen_height):
+    card_width = 200
+    card_height = 250
+    card_x = board_size // 2 - card_width // 2
+    card_y = screen_height // 2 - card_height // 2
+
+    gap = 10
+
+    # Draw card background and border
+    pygame.draw.rect(screen, (255, 255, 224), (card_x, card_y, card_width, card_height))  # Light yellow
+    pygame.draw.rect(screen, (0, 0, 0), (card_x, card_y, card_width, card_height), 2)
+
+    title_font = pygame.font.SysFont("Arial", 25, bold=True)
+    descript_font = pygame.font.SysFont(None, 22)
+
+    stype = getattr(space, "type", "")
+    if stype == "GoToJail":
+        title = title_font.render("GO TO JAIL!", True, (200,0,0))
+        msg = descript_font.render(f"{current_player.name} is sent to jail!", True, (0,0,0))
+
+        screen.blit(title, (card_x + 20, card_y + 20))
+        screen.blit(msg, (card_x + 20, card_y + 60))
+
+
+

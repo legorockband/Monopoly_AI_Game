@@ -371,8 +371,12 @@ class TaxSpace(Space):
 
     def land_on(self, player, board):
         super().land_on(player, board)
+        board.game.pending_tax = {
+            "player": player,
+            "amount": self.tax_amount,
+            "name": self.name
+        }
         print(f"  {player.name} pays ${self.tax_amount} for {self.name}.")
-        player.pay_money(self.tax_amount)
 
 class ChanceSpace(Space):
     def __init__(self, name: str, index: int):
@@ -536,6 +540,7 @@ class Game:
         self.pending_card = None
         self.pending_build = None
         self.pending_rent = None
+        self.pending_tax = None
 
         # Shuffle cards
         random.shuffle(self.chance_cards)
@@ -592,7 +597,6 @@ class Game:
 
         self.pending_purchase = None
 
-
     def confirm_build(self, action: str):
         """action: 'house' | 'hotel' | 'skip' """
         info = getattr(self, "pending_build", None)
@@ -609,6 +613,13 @@ class Game:
         else:
             print(f"{player.name} skipped building on {prop.name}.")
         self.pending_build = None
+
+    def confirm_tax(self):
+        info = getattr(self, "pending_tax", None)
+        if not info: return
+        p = info["player"]; amt = info["amount"]
+        p.pay_money(amt)
+        self.pending_tax = None
 
 
     def start_game(self):
