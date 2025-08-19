@@ -110,15 +110,12 @@ but_color = (255, 0, 0)
 
 but_rect = pygame.Rect(but_x, but_y, but_width, but_height)
 
-circ_center = (400, 650)
-circ_rad = 50
-circ_color = (255, 0, 0)
-
 def is_inside_circle(pos, center, radius):
     return (pos[0] - center[0])**2 + (pos[1] - center[1])**2 <= radius**2
 
-def make_dice_button(screen, circ_color, circ_center, circ_rad):
-    pygame.draw.circle(screen, circ_color, circ_center, circ_rad)
+def make_dice_button(screen, circ_color, circ_center, circ_rad, enable=True):
+    color = circ_color if enable else (160, 160, 160)
+    pygame.draw.circle(screen, color, circ_center, circ_rad)
     button_text = value_font.render("ROLL", True, (255, 255, 255))
     text_rect = button_text.get_rect(center=circ_center)
     screen.blit(button_text, text_rect)

@@ -1,7 +1,7 @@
 #board.py
 # reference link : https://www.pygame.org/docs/
 import pygame
-from game_test import Card
+from game_test import Game
 
 spaces_names = [
     "MEDITERRANEAN AVENUE", "COMMUNITY CHEST", "BALTIC AVENUE", "INCOME TAX", "READING RAILROAD", "ORIENTAL AVENUE", "CHANCE", "VERTMONT AVENUE", "CONNETICUT AVENUE", 
@@ -26,10 +26,6 @@ corner_names_short = [
 def board_game(screen, font, board_size:int, corner_size:int, space_size:int):
     screen.fill((255, 255, 255))
     space_rects= {}         # Contains all of the positons for the properties 
-    # space_rects[0] = None 
-    # space_rects[10] = None
-    # space_rects[20] = None
-    # space_rects[30] = None
 
     color_size = corner_size // 4
 
@@ -235,48 +231,102 @@ def draw_center_decks(screen, board_size, corner_size):
     chance_pos = (inner.right - pad - 60, inner.bottom - pad - 60)
     draw_card_deck(screen, chance_pos, card_size, 45, "CHANCE", (0, 0, 0), (255, 140, 0))
 
-def getPlayerPos(pos:int, board_size:int, corner_size:int, space_size:int):
-    if pos == 0:            # GO
-        x = board_size - corner_size
-        y = board_size - corner_size
+def edge_for_pos(pos:int) -> str:
+    """Which board edge does this position live on? ('bottom','left','top','right','corner')"""
+    if pos in (0, 10, 20, 30):
+        return "corner"
+    if 1  <= pos <= 9:   return "bottom"
+    if 11 <= pos <= 19:  return "left"
+    if 21 <= pos <= 29:  return "top"
+    if 31 <= pos <= 39:  return "right"
+    raise ValueError("Invalid position")
 
-    elif 1 <= pos <= 9:     # Bottom row (Right to Left)
+def tile_center(pos:int, board_size:int, corner_size:int, space_size:int) -> tuple[int,int]:
+    """Center (cx,cy) of the tile rect for a given board position."""
+    if pos == 0:                # GO
+        x = board_size - corner_size; y = board_size - corner_size + 25
+        return x + corner_size//2, y + corner_size//2
+    elif 1 <= pos <= 9:         # bottom (right -> left)
         x = board_size - corner_size - pos * space_size
-        y = board_size - corner_size
-    
-    elif pos == 10:         # Just Visiting
-        x = 0
-        y = board_size - corner_size
-
-    elif 11 <= pos <= 19:   # Left column (Bottom to Top)
+        y = board_size - corner_size + 25
+        return x + space_size//2, y + corner_size//2
+    elif pos == 10:             # Jail / Just Visiting
+        x = 0; y = board_size - corner_size + 25
+        return x + corner_size//2, y + corner_size//2
+    elif 11 <= pos <= 19:       # left (bottom -> top)
         x = 0
         y = board_size - corner_size - (pos - 10) * space_size
-
-    elif pos == 20:         # Free Parking
-        x = 0
-        y = 0
-
-    elif 21 <= pos <= 29:   # Top row (Left to Right)
+        return x + corner_size//2, y + space_size//2
+    elif pos == 20:             # Free Parking
+        x = 0; y = 0
+        return x + corner_size//2, y + corner_size//2
+    elif 21 <= pos <= 29:       # top (left -> right)
         x = corner_size + (pos - 21) * space_size
         y = 0
-
-    elif pos == 30:         # Go To Jail
+        return x + space_size//2, y + corner_size//2
+    elif pos == 30:             # Go To Jail
+        x = board_size - corner_size; y = 0
+        return x + corner_size//2, y + corner_size//2
+    elif 31 <= pos <= 39:       # right (top -> bottom)
         x = board_size - corner_size
-        y = 0
-
-    elif 31 <= pos <= 39:   # Right column (Top to Bottom)
-        x = board_size - corner_size
-        y = corner_size + (pos - 31) * space_size   
-
+        y = corner_size + (pos - 31) * space_size
+        return x + corner_size//2, y + space_size//2
     else:
         raise ValueError("Invalid Position on Board")
-        
-    return (x + 10, y + 10)  # slight offset for visual padding
+
+def layout_offsets(n:int, orientation:str, token_size:int=26, gap:int=6):
+    """
+    Return up to 4 (dx,dy) offsets for n tokens, arranged:
+      - orientation 'h' -> horizontal side-by-side
+      - orientation 'v' -> vertical top-bottom
+    The offsets are relative to the tile center.
+    """
+    half = token_size//2
+    if orientation == 'h':
+        # left/right first, then fill a 2x2 if needed
+        base = [(-half - gap//2, 0), (half + gap//2, 0), (-half - gap//2, -token_size - gap), (half + gap//2, -token_size - gap)] #Player 1,2,3,4
+    else:
+        # top/bottom first, then 2x2 if needed
+        base = [(0, -half - gap//2), (0,  half + gap//2),
+                (-token_size - gap, -half - gap//2), (-token_size - gap,  half + gap//2)]
+    return base[:max(1, n)]
+
 
 def move_player(screen, players, board_size:int, corner_size:int, space_size:int):
-    for idx, player in enumerate(players):
-        x, y = getPlayerPos(player.position, board_size, corner_size, space_size)
-        pygame.draw.rect(screen, player.color, (x + idx * 10, y + idx * 10, 20, 20))  # offset to avoid overlap
+    """
+    Draw player tokens so that when multiple players share a tile:
+      - bottom/top rows: tokens sit left/right of each other
+      - left/right columns: tokens stack top/bottom
+    """
+    TOKEN = 26  # square token size
+    # group players by board position
+    groups = {}
+    for p in players:
+        groups.setdefault(p.position, []).append(p)
+
+    for pos, group in groups.items():
+        cx, cy = tile_center(pos, board_size, corner_size, space_size)
+        edge = edge_for_pos(pos)
+        # decide orientation
+        if edge in ("bottom", "top"):
+            orientation = 'h'  # left/right on rows
+        elif edge in ("left", "right"):
+            orientation = 'v'  # top/bottom on columns
+        else:
+            # corners: fall back to a neat 2x2
+            orientation = 'h'
+
+        offsets = layout_offsets(len(group), orientation, token_size=TOKEN, gap=6)
+
+        # stable order: by player name (or keep input order)
+        for (dx, dy), player in zip(offsets, group):
+            x = int(cx + dx - TOKEN/2)
+            y = int(cy + dy - TOKEN/2)
+            pygame.draw.rect(screen, player.color, (x, y, TOKEN, TOKEN))
+            # optional thin border for visibility
+            pygame.draw.rect(screen, (0,0,0), (x, y, TOKEN, TOKEN), 1)
+
+
 
 def display_card(screen, current_player, card, board_size, screen_height):
     card_width = 200
@@ -403,3 +453,222 @@ def property_characteristic(screen, space, board_size, screen_height):
         y = line(y+10, "Rent Formula:", (0,0,0), body_font)
         y = line(y, "- Owns 1 Utility: 4 x dice sum",  font=mono_font)
         y = line(y, "- Owns 2 Utilities: 10 x dice sum", font=mono_font)
+
+def purchase_button_rects(cx, cy):
+    w, h = 110, 44
+    gap = 30
+    buy = pygame.Rect(cx - w - gap//2, cy - h//2, w, h)
+    skip = pygame.Rect(cx + gap//2, cy - h//2, w, h)
+    return buy, skip
+
+def draw_purchase_modal(screen, game, title_font, body_font, center_x, center_y):
+    info = game.pending_purchase
+    if not info:
+        return
+    prop = info["property"]
+    player = info["player"]
+    affordable = info.get("affordable", True)
+
+    # card
+    modal_w, modal_h = 360, 220
+    x = center_x - modal_w // 2
+    y = center_y - modal_h // 2
+    pygame.draw.rect(screen, (255, 255, 224), (x, y, modal_w, modal_h))
+    pygame.draw.rect(screen, (0, 0, 0), (x, y, modal_w, modal_h), 2)
+
+    # text
+    title = title_font.render("Purchase Property?", True, (0,0,0))
+    screen.blit(title, (x + (modal_w - title.get_width())//2, y + 10))
+
+    name_text = body_font.render(prop.name, True, (0,0,0))
+    cost_text = body_font.render(f"Cost: ${prop.cost}", True, (0,0,0))
+    who_text = body_font.render(f"Player: {player.name}", True, (0,0,0))
+    screen.blit(name_text, (x + 20, y + 60))
+    screen.blit(cost_text, (x + 20, y + 90))
+    screen.blit(who_text, (x + 20, y + 120))
+
+    # buttons
+    buy_rect, skip_rect = purchase_button_rects(center_x, center_y + 55)
+    buy_color = (0,150,0) if affordable else (120,120,120)
+    skip_color = (150,0,0)
+    pygame.draw.rect(screen, buy_color, buy_rect)
+    pygame.draw.rect(screen, skip_color, skip_rect)
+
+    buy_lbl = body_font.render("BUY", True, (255,255,255)) if affordable else body_font.render("CAN'T BUY", True, (255,255,255))
+    skip_lbl = body_font.render("SKIP", True, (255,255,255))
+    screen.blit(buy_lbl, (buy_rect.centerx - buy_lbl.get_width()//2, buy_rect.centery - buy_lbl.get_height()//2))
+    screen.blit(skip_lbl, (skip_rect.centerx - skip_lbl.get_width()//2, skip_rect.centery - skip_lbl.get_height()//2))
+
+def draw_rent_modal(screen, game, title_font, body_font, cx, cy):
+    info = game.pending_rent
+    if not info: return
+    p, o, prop, amt = info["player"], info["owner"], info["property"], info["amount"]
+
+    w,h = 360, 200
+    x,y = cx - w//2, cy - h//2
+    pygame.draw.rect(screen, (255,255,224), (x,y,w,h))
+    pygame.draw.rect(screen, (0,0,0), (x,y,w,h), 2)
+
+    t = title_font.render("Rent Due", True, (0,0,0))
+    screen.blit(t, (x+(w-t.get_width())//2, y+10))
+    a = body_font.render(f"{p.name} landed on {prop.name}", True, (0,0,0))
+    b = body_font.render(f"Owes ${amt} to {o.name}", True, (0,0,0))
+    screen.blit(a, (x+20, y+60)); screen.blit(b, (x+20, y+90))
+
+    pay_rect = pygame.Rect(cx-55, cy+30, 110, 44)
+    pygame.draw.rect(screen, (0,120,200), pay_rect)
+    pay_lbl = body_font.render("PAY", True, (255,255,255))
+    screen.blit(pay_lbl, (pay_rect.centerx - pay_lbl.get_width()//2,
+                          pay_rect.centery - pay_lbl.get_height()//2))
+    return pay_rect
+
+def draw_build_modal(screen, game, title_font, body_font, cx, cy):
+    info = game.pending_build
+    if not info: return None, None, None
+    prop = info["property"]; player = info["player"]
+    can_house = info["can_house"]; can_hotel = info["can_hotel"]
+
+    # Main card
+    w,h = 420, 240
+    x,y = cx - w//2, cy - h//2
+    pygame.draw.rect(screen, (255,255,224), (x,y,w,h))
+    pygame.draw.rect(screen, (0,0,0), (x,y,w,h), 2)
+
+    # Text on card
+    t = title_font.render("Build on Your Property?", True, (0,0,0))
+    screen.blit(t, (x+(w-t.get_width())//2, y+10))
+    a = body_font.render(f"{prop.name}", True, (0,0,0))
+    b = body_font.render(f"Houses: {prop.num_houses}  Hotel: {'Yes' if prop.has_hotel else 'No'}", True, (0,0,0))
+    c = body_font.render(f"Cost per build: ${prop.house_cost}", True, (0,0,0))
+    screen.blit(a, (x+20,y+60)); screen.blit(b,(x+20,y+90)); screen.blit(c,(x+20,y+120))
+
+    # Buttons on card
+    r_house = pygame.Rect(cx-180, cy+50, 120, 44)
+    r_hotel = pygame.Rect(cx-60,  cy+50, 120, 44)
+    r_skip  = pygame.Rect(cx+60,  cy+50, 120, 44)
+
+    pygame.draw.rect(screen, (0,150,0) if can_house else (120,120,120), r_house)
+    pygame.draw.rect(screen, (150,100,0) if can_hotel else (120,120,120), r_hotel)
+    pygame.draw.rect(screen, (150,0,0), r_skip)
+
+    def center(lbl, rect):
+        screen.blit(lbl, (rect.centerx - lbl.get_width()//2, rect.centery - lbl.get_height()//2))
+    center(body_font.render("BUY HOUSE", True, (255,255,255)), r_house)
+    center(body_font.render("BUY HOTEL", True, (255,255,255)), r_hotel)
+    center(body_font.render("SKIP", True, (255,255,255)), r_skip)
+    return r_house, r_hotel, r_skip
+
+def draw_property_build_badges(screen, game, space_rects):
+    import pygame
+    GREEN = (0, 180, 0)   # houses
+    RED   = (220, 40, 40) # hotels
+
+    size = 15  # triangle size; tweak to taste
+    gap  = 3   # spacing between multiple houses
+    pad  = 3   # padding away from the color band
+
+    def side_for_pos(pos:int):
+        # Matches how your board indexes map to edges
+        if   1  <= pos <= 9:   return "bottom"  # right->left along bottom edge
+        elif 11 <= pos <= 19:  return "left"    # bottom->top along left edge
+        elif 21 <= pos <= 29:  return "top"     # left->right along top edge
+        elif 31 <= pos <= 39:  return "right"   # top->bottom along right edge
+        return None
+
+    def tri_points(x, y, s, direction:str):
+        # Triangles pointing toward the board interior (apex points toward the color band)
+        if direction == "up":     # apex up
+            return [(x, y + s), (x + s/2, y), (x + s, y + s)]
+        if direction == "down":   # apex down
+            return [(x, y), (x + s/2, y + s), (x + s, y)]
+        if direction == "left":   # apex left
+            return [(x + s, y), (x, y + s/2), (x + s, y + s)]
+        if direction == "right":  # apex right
+            return [(x, y), (x + s, y + s/2), (x, y + s)]
+        raise ValueError("bad direction")
+
+    for pos, rect in space_rects.items():
+        sp = game.board.spaces[pos]
+        if getattr(sp, "type", "") != "Property": 
+            continue
+        if getattr(sp, "owner", None) is None:
+            continue
+
+        side = side_for_pos(pos)
+        if side is None:
+            continue
+
+        # Your color band is 1/4 of the short side on each tile — derive per-rect.
+        color_size = min(rect.width, rect.height) // 4
+
+        # Compute anchor & orientation so triangles sit just *inside* the band and point toward it.
+        if side == "bottom":
+            # band along the TOP of the tile; draw just below it, pointing UP
+            x0 = rect.left + pad
+            y0 = rect.top  + color_size - pad
+            if getattr(sp, "has_hotel", True):
+                x0 = x0 + color_size
+                y0 = y0 - 10
+            direction = "up"
+            def nth_xy(i):  # lay houses in a row
+                return x0 + i * (size + gap), y0
+
+        elif side == "top":
+            # band along the BOTTOM of the tile; draw just above it, pointing DOWN
+            x0 = rect.left + pad
+            y0 = rect.bottom - color_size + pad - size
+            if getattr(sp, "has_hotel", True):
+                x0 = x0 + color_size
+            direction = "down"
+            def nth_xy(i):
+                return x0 + i * (size + gap), y0
+
+        elif side == "left":
+            # band along the RIGHT edge; draw just left of it, pointing RIGHT
+            x0 = rect.right - color_size + pad - size
+            y0 = rect.top + pad
+            if getattr(sp, "has_hotel", True):
+                y0 = y0 + color_size
+            direction = "right"
+            def nth_xy(i):  # stack vertically
+                return x0, y0 + i * (size + gap)
+
+        elif side == "right":
+            # band along the LEFT edge; draw just right of it, pointing LEFT
+            x0 = rect.left + color_size - pad
+            y0 = rect.top + pad
+            if getattr(sp, "has_hotel", True):
+                y0 = y0 + color_size
+                x0 = x0 - 10
+            direction = "left"
+            def nth_xy(i):
+                return x0, y0 + i * (size + gap)
+
+        # Draw hotel OR houses
+        if getattr(sp, "has_hotel", False):
+            # hotels: one red triangle, slightly larger
+            s = size + 10
+            pts = tri_points(x0, y0, s, direction)
+            pygame.draw.polygon(screen, RED, pts)
+            pygame.draw.polygon(screen, (0, 0, 0), pts, 1)
+            continue
+
+        n = int(getattr(sp, "num_houses", 0))
+        for i in range(min(n, 4)):
+            xi, yi = nth_xy(i)
+            pts = tri_points(xi, yi, size, direction)
+            pygame.draw.polygon(screen, GREEN, pts)
+            pygame.draw.polygon(screen, (0, 0, 0), pts, 1)
+
+def end_turn_button(screen:pygame.Surface, value_font, center_pos:tuple[int, int], enable:bool=True):
+    cx,cy = center_pos
+    # Position for the rectangle
+    cx = cx + 140
+    width = 140
+    height = 50 
+    end_rect = pygame.Rect(cx, cy, width, height)
+    color = (200,0,0) if enable else (160,160,160)  # If you can't end turn, make grey or make red
+    pygame.draw.rect(screen, color, end_rect)
+    end_turn_text = value_font.render("End Turn", True, (0,0,0))
+    screen.blit(end_turn_text, (cx + (width - end_turn_text.get_width())//2, cy + (height - end_turn_text.get_height())//2))
+    return end_rect

@@ -58,7 +58,6 @@ class Player:
     def count_utilities(self):
         return sum(1 for p in self.properties_owned if isinstance(p, Utility))
 
-
 class Dice:
     def __init__(self):
         self.die1_value = 0
@@ -72,7 +71,6 @@ class Dice:
         is_double = (self.die1_value == self.die2_value)
         print(f"Rolled {self.die1_value} and {self.die2_value} (Sum: {roll_sum}). {'DOUBLES!' if is_double else ''}")
         return roll_sum, is_double
-
 
 class Card:
     def __init__(self, description: str, card_type: str, action_type: str, value: any = None, target_space_index: int = None):
@@ -210,10 +208,7 @@ class Property(Space):
                     "property": self,
                     "amount": rent_amount
                 }
-                
                 print(f"  {player.name} landed on {self.name} (owned by {self.owner.name}) and pays ${rent_amount} rent.")
-                # player.pay_money(rent_amount)
-                # self.owner.collect_money(rent_amount)
             else:
                 print(f"  {self.name} is mortgaged, no rent due.")
             return 
@@ -309,9 +304,14 @@ class Railroad(Space):
             num_owned = self.owner.count_railroads()
             rent_amount = self.calculate_rent(num_owned)
             if rent_amount > 0:
+                board.game.pending_rent = {
+                    "player": player,
+                    "owner": self.owner,
+                    "property": self,
+                    "amount": rent_amount
+                }
                 print(f"  {player.name} landed on {self.name} (owned by {self.owner.name}) and pays ${rent_amount} rent.")
-                player.pay_money(rent_amount)
-                self.owner.collect_money(rent_amount)
+
             else:
                 print(f"  {self.name} is mortgaged, no rent due.")
         else:
@@ -350,9 +350,15 @@ class Utility(Space):
             num_owned = self.owner.count_utilities()
             rent_amount = self.calculate_rent(last_roll_sum, num_owned)
             if rent_amount > 0:
+                board.game.pending_rent = {
+                    "player": player,
+                    "owner": self.owner,
+                    "property": self,
+                    "amount": rent_amount
+                }
                 print(f"  {player.name} landed on {self.name} (owned by {self.owner.name}) and pays ${rent_amount} rent.")
-                player.pay_money(rent_amount)
-                self.owner.collect_money(rent_amount)
+                # player.pay_money(rent_amount)
+                # self.owner.collect_money(rent_amount)
             else:
                 print(f"  {self.name} is mortgaged, no rent due.")
         else:
@@ -586,13 +592,9 @@ class Game:
 
         self.pending_purchase = None
 
-    
-
 
     def confirm_build(self, action: str):
-        """
-        action: 'house' | 'hotel' | 'skip'
-        """
+        """action: 'house' | 'hotel' | 'skip' """
         info = getattr(self, "pending_build", None)
         if not info: return
         player = info["player"]
