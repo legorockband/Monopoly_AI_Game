@@ -421,9 +421,10 @@ class GoToJailSpace(Space):
     def land_on(self, player, board):
         super().land_on(player, board)
         print(f"  {player.name} sent to Jail!")
-        player.in_jail = True
-        player.position = board.jail_space_index # Move to Jail space
-        player.jail_turns = 0 # Reset jail turns for entering via card
+        # player.in_jail = True
+        # player.position = board.jail_space_index # Move to Jail space
+        # player.jail_turns = 0 # Reset jail turns for entering via card
+        board.game.pending_jail = {"player": player}
 
 class JailSpace(Space):
     def __init__(self, name: str, index: int):
@@ -541,6 +542,7 @@ class Game:
         self.pending_build = None
         self.pending_rent = None
         self.pending_tax = None
+        self.pending_jail = None
 
         # Shuffle cards
         random.shuffle(self.chance_cards)
@@ -621,7 +623,6 @@ class Game:
         p.pay_money(amt)
         self.pending_tax = None
 
-
     def start_game(self):
         print("--- Monopoly Game Started! ---")
         print(f"Players: {[p.name for p in self.players]}")
@@ -651,7 +652,6 @@ class Game:
             self.current_player_index = (self.current_player_index + 1) % len(self.players)
             input("\nPress Enter to continue to next player's turn...") # Pause for user
 
-
     def _determine_first_player(self):
         print("\n--- Determining First Player ---")
         highest_roll = -1
@@ -680,7 +680,6 @@ class Game:
             else:
                 print(f"\nTie! Players {[p.name for p in tied_players]} all rolled {max_roll_this_round}. They will re-roll.")
                 active_players_for_roll = tied_players # Only tied players re-roll
-
 
     def take_turn(self, player):
         #handles a single player's turn.
@@ -713,7 +712,6 @@ class Game:
                 break # End turn if no doubles
 
             print(f"  {player.name} gets another roll for rolling doubles!")
-
 
     def handle_jail_turn(self, player):
         """Handles a player's turn while they are in Jail."""

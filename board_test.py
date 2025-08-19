@@ -447,8 +447,8 @@ def property_characteristic(screen:pygame.Surface, space, board_size, screen_hei
     elif stype == "Utility":
         # Rent is 4× or 10× the dice sum depending on utilities owned:contentReference[oaicite:6]{index=6}
         y = line(y+10, "Rent Formula:", (0,0,0), body_font)
-        y = line(y, "- Owns 1 Utility: 4 x dice sum",  font=mono_font)
-        y = line(y, "- Owns 2 Utilities: 10 x dice sum", font=mono_font)
+        y = line(y, "- Owns 1: 4 x dice sum",  font=mono_font)
+        y = line(y, "- Owns 2: 10 x dice sum", font=mono_font)
 
 def purchase_button_rects(cx, cy):
     w, h = 110, 44
@@ -576,6 +576,29 @@ def draw_tax_modal(screen:pygame.Surface, game, title_font, body_font, cx, cy):
                           pay_rect.centery - pay_lbl.get_height()//2))
     return pay_rect
 
+def draw_jail_modal(screen, game, title_font, body_font, cx, cy):
+    info = game.pending_jail
+    if not info: 
+        return None
+    p = info["player"]
+
+    w,h = 360, 180
+    x,y = cx - w//2, cy - h//2
+    pygame.draw.rect(screen, (255,255,224), (x,y,w,h))
+    pygame.draw.rect(screen, (0,0,0), (x,y,w,h), 2)
+
+    t = title_font.render("GO TO JAIL!", True, (200,0,0))
+    a = body_font.render(f"{p.name} has been sent to Jail.", True, (0,0,0))
+    screen.blit(t, (x+(w-t.get_width())//2, y+10))
+    screen.blit(a, (x+20, y+60))
+
+    ok_rect = pygame.Rect(cx-55, cy+30, 110, 44)
+    pygame.draw.rect(screen, (0,120,200), ok_rect)
+    ok_lbl = body_font.render("OK", True, (255,255,255))
+    screen.blit(ok_lbl, (ok_rect.centerx - ok_lbl.get_width()//2,
+                         ok_rect.centery - ok_lbl.get_height()//2))
+    return ok_rect
+
 def draw_property_build_badges(screen:pygame.Surface, game, space_rects):
     import pygame
     GREEN = (0, 180, 0)   # houses
@@ -691,28 +714,6 @@ def end_turn_button(screen:pygame.Surface, value_font, center_pos:tuple[int, int
     screen.blit(end_turn_text, (cx + (width - end_turn_text.get_width())//2, cy + (height - end_turn_text.get_height())//2))
     return end_rect
 
-def jail_tax_display(screen:pygame.Surface, current_player, space, board_size, screen_height):
-    card_width = 200
-    card_height = 250
-    card_x = board_size // 2 - card_width // 2
-    card_y = screen_height // 2 - card_height // 2
-
-    gap = 10
-
-    # Draw card background and border
-    pygame.draw.rect(screen, (255, 255, 224), (card_x, card_y, card_width, card_height))  # Light yellow
-    pygame.draw.rect(screen, (0, 0, 0), (card_x, card_y, card_width, card_height), 2)
-
-    title_font = pygame.font.SysFont("Arial", 25, bold=True)
-    descript_font = pygame.font.SysFont(None, 22)
-
-    stype = getattr(space, "type", "")
-    if stype == "GoToJail":
-        title = title_font.render("GO TO JAIL!", True, (200,0,0))
-        msg = descript_font.render(f"{current_player.name} is sent to jail!", True, (0,0,0))
-
-        screen.blit(title, (card_x + 20, card_y + 20))
-        screen.blit(msg, (card_x + 20, card_y + 60))
 
 
 

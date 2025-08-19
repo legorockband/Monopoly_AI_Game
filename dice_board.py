@@ -139,6 +139,20 @@ def running_display(num_players: int):
 
                     continue
                 
+                # Jail popup
+                if game.pending_jail:
+                    cx, cy = board_center
+                    ok_rect = pygame.Rect(cx - 55, cy + 30, 110, 44)
+                    if ok_rect.collidepoint(mouse_pos):
+                        # Now send the player to Jail
+                        p = game.pending_jail["player"]
+                        p.in_jail = True
+                        p.position = game.board.jail_space_index
+                        p.jail_turns = 0
+                        print(f"{p.name} has been moved to Jail.")
+                        game.pending_jail = None
+                    continue
+
                 if selected_space is not None:
                     selected_space = None
                     continue
@@ -178,20 +192,15 @@ def running_display(num_players: int):
                     roll_total, is_doubles = game.dice.roll()
                     has_rolled = True
                     rolled = (game.dice.die1_value, game.dice.die2_value)
-                    roll_total = 30
+                    roll_total = 7
                     player.move(roll_total, game.board)
-
-                    sp = game.board.spaces[player.position]
-                    if getattr(sp, "type", "") == "GoToJail":
-                        board_test.jail_tax_display(screen, player, sp, board_size, screen_height)
 
                 # What the do if there are doubles 
                 if is_doubles:
                     player.doubles_rolled_consecutive += 1
                     if player.doubles_rolled_consecutive == 3:
                         print(f"{player.name} rolled 3 doubles! Go to jail.")
-                        player.in_jail = True
-                        player.position = game.board.jail_space_index
+                        game.pending_jail = {"player": player}
                         player.doubles_rolled_consecutive = 0
                         rolled = None
                         is_doubles = False
@@ -251,6 +260,9 @@ def running_display(num_players: int):
 
         elif game.pending_tax:
             board_test.draw_tax_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
+        
+        elif game.pending_jail:
+            board_test.draw_jail_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
         elif selected_space is not None:
             board_test.property_characteristic(screen, selected_space, board_size, screen_height)
