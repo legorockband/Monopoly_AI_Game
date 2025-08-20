@@ -382,7 +382,7 @@ def wrap_text(text, font, max_width):
 def property_characteristic(screen:pygame.Surface, space, board_size, screen_height):
     # When click on a property create a simple card display to show the rent and cost of houses/hotels etc
     card_width = 360
-    card_height = 420
+    card_height = 450
     card_x = board_size // 2 - card_width // 2
     card_y = screen_height // 2 - card_height // 2
 
@@ -424,6 +424,9 @@ def property_characteristic(screen:pygame.Surface, space, board_size, screen_hei
     mort = getattr(space, "mortgage_value", None)
     if mort is not None:
         y = line(y,   f"Mortgage Value: ${mort}")
+    if hasattr(space, "is_mortgaged"):
+        y = line(y, f"Mortgaged: {'Yes' if space.is_mortgaged else 'No'}",
+            (150,0,0) if space.is_mortgaged else (0,120,0))
 
     if stype == "Property":
         # Uses rent_values: [base, 1 house, 2, 3, 4, hotel] and house_cost:contentReference[oaicite:3]{index=3}
@@ -533,28 +536,41 @@ def draw_build_modal(screen:pygame.Surface, game, title_font, body_font, cx, cy)
     if not info: return None, None, None
     prop = info["property"]; player = info["player"]
     can_house = info["can_house"]; can_hotel = info["can_hotel"]
+    can_sell_house = info.get("can_sell_house", False)
+    can_sell_hotel = info.get("can_sell_hotel", False)
+    can_mortgage   = info.get("can_mortgage", False)
+    can_unmortgage = info.get("can_unmortgage", False)
 
     # Main card
-    w,h = 420, 240
+    w,h = 700, 360    
     x,y = cx - w//2, cy - h//2
     pygame.draw.rect(screen, (255,255,224), (x,y,w,h))
     pygame.draw.rect(screen, (0,0,0), (x,y,w,h), 2)
 
     # Text on card
-    t = title_font.render("Build on Your Property?", True, (0,0,0))
+    t = title_font.render("Manage Buildings", True, (0,0,0))
     screen.blit(t, (x+(w-t.get_width())//2, y+10))
+    
     a = body_font.render(f"{prop.name}", True, (0,0,0))
     b = body_font.render(f"Houses: {prop.num_houses}  Hotel: {'Yes' if prop.has_hotel else 'No'}", True, (0,0,0))
-    c = body_font.render(f"Cost per build: ${prop.house_cost}", True, (0,0,0))
+    c = body_font.render(f"Build/Sell price per step: ${prop.house_cost}", True, (0,0,0))    
     screen.blit(a, (x+20,y+60)); screen.blit(b,(x+20,y+90)); screen.blit(c,(x+20,y+120))
+    
+    d = body_font.render(f"Mortgaged: {'Yes' if getattr(prop, 'is_mortgaged', False) else 'No'}", True, (150,0,0) if getattr(prop,'is_mortgaged',False) else (0,120,0))
+    screen.blit(a, (x+20,y+60)); screen.blit(b, (x+20,y+90)); screen.blit(c, (x+20,y+120)); screen.blit(d, (x+20,y+150))
+
 
     # Buttons on card
     r_house = pygame.Rect(cx-180, cy+50, 120, 44)
     r_hotel = pygame.Rect(cx-60,  cy+50, 120, 44)
     r_skip  = pygame.Rect(cx+60,  cy+50, 120, 44)
+    r_sell_house = pygame.Rect(cx-180, cy+110, 120, 44)
+    r_sell_hotel = pygame.Rect(cx-60,  cy+110, 120, 44)
 
     pygame.draw.rect(screen, (0,150,0) if can_house else (120,120,120), r_house)
     pygame.draw.rect(screen, (150,100,0) if can_hotel else (120,120,120), r_hotel)
+    pygame.draw.rect(screen, (0,120,200) if can_sell_house else (120,120,120), r_sell_house)
+    pygame.draw.rect(screen, (0,120,200) if can_sell_hotel else (120,120,120), r_sell_hotel)
     pygame.draw.rect(screen, (150,0,0), r_skip)
 
     def center(lbl, rect):
@@ -562,7 +578,33 @@ def draw_build_modal(screen:pygame.Surface, game, title_font, body_font, cx, cy)
     center(body_font.render("BUY HOUSE", True, (255,255,255)), r_house)
     center(body_font.render("BUY HOTEL", True, (255,255,255)), r_hotel)
     center(body_font.render("SKIP", True, (255,255,255)), r_skip)
-    return r_house, r_hotel, r_skip
+    center(body_font.render("SELL HOUSE",  True, (255,255,255)), r_sell_house)
+    center(body_font.render("SELL HOTEL",  True, (255,255,255)), r_sell_hotel)
+    
+    # Mortgage / Unmortgage buttons
+    r_mortgage   = pygame.Rect(cx+40,  cy+50, 140, 44)
+    r_unmortgage = pygame.Rect(cx+40,  cy+110, 140, 44)
+
+    pygame.draw.rect(screen, (120,120,120) if not can_mortgage else (180,70,0), r_mortgage)
+    pygame.draw.rect(screen, (120,120,120) if not can_unmortgage else (0,150,0), r_unmortgage)
+    center(body_font.render("MORTGAGE",   True, (255,255,255)), r_mortgage)
+    center(body_font.render("UNMORTGAGE", True, (255,255,255)), r_unmortgage)
+
+    # Skip button on the right
+    r_skip  = pygame.Rect(cx+220, cy+80, 120, 44)
+    pygame.draw.rect(screen, (150,0,0), r_skip)
+    center(body_font.render("SKIP", True, (255,255,255)), r_skip)
+
+    # return all rects a caller might need
+    return {
+        "buy_house": r_house,
+        "buy_hotel": r_hotel,
+        "sell_house": r_sell_house,
+        "sell_hotel": r_sell_hotel,
+        "mortgage": r_mortgage,
+        "unmortgage": r_unmortgage,
+        "skip": r_skip,
+    }
 
 def draw_tax_modal(screen:pygame.Surface, game, title_font, body_font, cx, cy):
     info = game.pending_tax
@@ -612,7 +654,7 @@ def draw_jail_modal(screen, game, title_font, body_font, cx, cy):
 def trade_button(screen, value_font, center_pos, enable=True):
     """Draw a 'Trade' button directly ABOVE End Turn and return its rect."""
     cx, cy = center_pos
-    cx = cx + 140
+    cx = cx + 230
     # End Turn is +30; its height is 50. Put Trade one height (50) above with a tidy gap.
     cy = cy - 30
     w, h = 140, 50
@@ -622,6 +664,76 @@ def trade_button(screen, value_font, center_pos, enable=True):
     lbl = value_font.render("Trade", True, (0,0,0))
     screen.blit(lbl, (r.centerx - lbl.get_width()//2, r.centery - lbl.get_height()//2))
     return r
+
+def manage_button(screen, value_font, center_pos, enable=True):
+    """Draw a 'Manage' button above Trade; returns its rect."""
+    cx, cy = center_pos
+    cx = cx + 230
+    cy = cy - 90  # stack above Trade/End Turn
+    w, h = 140, 50
+    r = pygame.Rect(cx, cy, w, h)
+    color = (0, 120, 200) if enable else (160,160,160)
+    pygame.draw.rect(screen, color, r)
+    lbl = value_font.render("Manage", True, (0,0,0))
+    screen.blit(lbl, (r.centerx - lbl.get_width()//2, r.centery - lbl.get_height()//2))
+    return r
+
+def draw_manage_select_modal(screen, player, board, cx, cy):
+    """
+    Modal: pick one of the current player's owned properties to manage.
+    Returns (prop_btn_rects:list[(Rect, property_obj)], cancel_rect:Rect)
+    """
+    import pygame
+    from game_test import Property, Railroad, Utility
+
+    title_font = pygame.font.SysFont("Arial", 24, bold=True)
+    body_font  = pygame.font.SysFont(None, 22)
+
+    # Shell
+    W, H = 770, 660
+    x, y = cx - W//2, cy - H//2
+    pygame.draw.rect(screen, (255,255,224), (x,y,W,H))
+    pygame.draw.rect(screen, (0,0,0), (x,y,W,H), 2)
+
+    t = title_font.render(f"Manage Buildings", True, (0,0,0))
+    screen.blit(t, (x + (W - t.get_width())//2, y + 12))
+
+    # Filter to real buildable properties (ignore RR/Utility)
+    owned_props = [sp for sp in player.properties_owned if isinstance(sp, Property)]
+    if not owned_props:
+        none_lbl = body_font.render("You do not own any color properties.", True, (120,0,0))
+        screen.blit(none_lbl, (x + (W - none_lbl.get_width())//2, y + 80))
+
+    # Grid of buttons
+    btns = []
+    bx, by = x + 20, y + 60
+    bw, bh = 230, 36
+    gap_x, gap_y = 20, 25
+    per_row = 3
+
+    for i, sp in enumerate(owned_props):
+        col = i % per_row
+        row = i // per_row
+        rx = bx + col * (bw + gap_x)
+        ry = by + row * (bh + gap_y)
+        r = pygame.Rect(rx, ry, bw, bh)
+        pygame.draw.rect(screen, (220,220,220), r, border_radius=8)
+        pygame.draw.rect(screen, (0,0,0), r, 2, border_radius=8)
+        name = body_font.render(sp.name, True, getattr(sp, "color_group", (0,0,0)))
+        screen.blit(name, (r.centerx - name.get_width()//2, r.centery - name.get_height()//2))
+        btns.append((r, sp))
+
+        # Small status (Houses/Hotel)
+        status = body_font.render(f"Houses: {sp.num_houses}  Hotel: {'Yes' if sp.has_hotel else 'No'}", True, (40,40,40))
+        screen.blit(status, (rx + 8, ry + bh + 5))
+
+    # Cancel
+    cancel_rect  = pygame.Rect(x + W//2 - 70, y + H - 60, 140, 44)
+    pygame.draw.rect(screen, (150,0,0), cancel_rect)
+    c2 = body_font.render("CANCEL",  True, (255,255,255))
+    screen.blit(c2, (cancel_rect.centerx - c2.get_width()//2,  cancel_rect.centery  - c2.get_height()//2))
+
+    return btns, cancel_rect
 
 def draw_trade_select_modal(screen, players, selected_idxs, cx, cy):
     """
@@ -1027,7 +1139,7 @@ def draw_property_build_badges(screen:pygame.Surface, game, space_rects):
 def end_turn_button(screen:pygame.Surface, value_font, center_pos:tuple[int, int], enable:bool=True):
     cx,cy = center_pos
     # Position for the rectangle
-    cx = cx + 140
+    cx = cx + 230
     cy = cy + 30
     width = 140
     height = 50 
@@ -1038,3 +1150,55 @@ def end_turn_button(screen:pygame.Surface, value_font, center_pos:tuple[int, int
     screen.blit(end_turn_text, (cx + (width - end_turn_text.get_width())//2, cy + (height - end_turn_text.get_height())//2))
     return end_rect
 
+def draw_mortgage_badges(screen, game, space_rects):
+    badge_font = pygame.font.SysFont(None, 18)
+    for sp in game.board.spaces:
+        if not hasattr(sp, "is_mortgaged") or not sp.is_mortgaged:
+            continue
+        rect = space_rects.get(sp.index)
+        if not rect: 
+            continue
+        # small red badge in top-left of the tile
+        bx, by = rect.left + 4, rect.top + 4
+        bw, bh = 18, 18
+        pygame.draw.rect(screen, (180, 40, 40), (bx, by, bw, bh), border_radius=4)
+        pygame.draw.rect(screen, (0,0,0), (bx, by, bw, bh), 1, border_radius=4)
+        m = badge_font.render("M", True, (255,255,255))
+        screen.blit(m, (bx + (bw - m.get_width())//2, by + (bh - m.get_height())//2))
+
+def draw_debt_modal(screen, game, title_font, body_font, cx, cy):
+    info = game.pending_debt
+    if not info: return None, None
+    p   = info["player"]
+    amt = info["amount"]
+    cred = info["creditor"]
+    who  = cred.name if cred else "Bank"
+
+    w,h = 420, 220
+    x,y = cx - w//2, cy - h//2
+    pygame.draw.rect(screen, (255,255,224), (x,y,w,h)); pygame.draw.rect(screen,(0,0,0),(x,y,w,h),2)
+
+    t = title_font.render("Debt Due", True, (0,0,0))
+    screen.blit(t, (x+(w-t.get_width())//2, y+12))
+    a = body_font.render(f"{p.name} owes ${amt} to {who}", True, (0,0,0))
+    b = body_font.render(info.get("reason",""), True, (60,60,60))
+    c = body_font.render(f"Cash: ${p.money}", True, (0,0,0))
+    screen.blit(a, (x+20,y+60)); screen.blit(b,(x+20,y+90)); screen.blit(c,(x+20,y+120))
+
+    pay_rect = pygame.Rect(x+40,  y+150, 140, 44)
+    manage_rect = pygame.Rect(x+170, y+160, 120, 44)
+    bk_rect  = pygame.Rect(x+240, y+150, 140, 44)
+    can_pay  = p.money >= amt
+
+
+    pygame.draw.rect(screen, (0,150,0) if can_pay else (150,150,150), pay_rect)
+    pygame.draw.rect(screen, (0,120,200), manage_rect)
+    pygame.draw.rect(screen, (180,0,0), bk_rect)
+
+    pl = body_font.render("PAY NOW", True, (255,255,255))
+    ml = body_font.render("MANAGE",  True, (255,255,255))
+    bl = body_font.render("BANKRUPT", True, (255,255,255))
+    screen.blit(pl, (pay_rect.centerx - pl.get_width()//2, pay_rect.centery - pl.get_height()//2))
+    screen.blit(ml, (manage_rect.centerx - ml.get_width()//2, manage_rect.centery - ml.get_height()//2))
+    screen.blit(bl, (bk_rect.centerx  - bl.get_width()//2,  bk_rect.centery  - bl.get_height()//2))
+    return pay_rect, bk_rect, manage_rect
