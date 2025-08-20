@@ -217,12 +217,16 @@ class Property(Space):
             print(f"  {player.name} landed on their own property, {self.name}.")
             can_house, _ = self.can_build_house(player, board)
             can_hotel, _ = self.can_build_hotel(player, board)
-            if can_house or can_hotel:
+            can_sell_house, _ = self.can_sell_house(player, board)
+            can_sell_hotel, _ = self.can_sell_hotel(player, board)
+            if can_house or can_hotel or can_sell_hotel or can_sell_house:
                 board.game.pending_build = {
                     "player": player,
                     "property": self,
                     "can_house": can_house,
                     "can_hotel": can_hotel,
+                    "can_sell_house": can_sell_house,
+                    "can_sell_hotel": can_sell_hotel,
                     "cost": self.house_cost,
                 }
 
@@ -271,6 +275,41 @@ class Property(Space):
         self.num_houses = 0
         self.has_hotel = True
         print(f"{owner.name} built a HOTEL on {self.name}.")
+
+    def can_sell_house(self, owner, board):
+        if self.owner != owner:
+            return (False, "Not owner")
+        if self.has_hotel:
+            return (False, "Must sell hotel first")
+        if self.num_houses <= 0:
+            return (False, "No houses to sell")
+        
+        # you can not make this property have fewer houses than another property in the same set by more than 1
+        group = [p for p in self.group_mates(board) if not p.has_hotel]
+        max_houses = max((p.num_houses for p in group), default=0)
+        if self.num_houses < max_houses:
+            return (False, "Sell evenly across the set")
+        return (True, "")
+    
+    def can_sell_hotel (self, owner, board):
+        if self.owner != owner:
+            return (False, "Not owner")
+        if not self.has_hotel:
+            return (False, "No hotel to sell")
+        return (True, "")
+    
+    # bank pays half the house price
+    def sell_house(self, owner):
+        owner.collect_money(self.house_cost // 2)
+        self.num_houses = max(0, self.num_houses - 1)
+        print(f"{owner.name} sold a house on {self.name} (now {self.num_houses}).")
+
+    # bank pays half the hotel price - hotel price equal the house price of color set
+    def sell_hotel(self, owner):
+        owner.collect_money(self.house_cost // 2)
+        self.has_hotel = False
+        self.num_houses = 4
+        print(f"{owner.name} sold a HOTEL on {self.name} (now 4 houses).")
 
 class Railroad(Space):
     """Represents a Railroad property."""
@@ -659,10 +698,12 @@ class Game:
 
         if action == "house" and info["can_house"]:
             prop.build_house(player)
-
         elif action == "hotel" and info["can_hotel"]:
             prop.build_hotel(player)
-
+        elif action == "sell_house" and info.get("can_sell_house"):
+            prop.sell_house(player)
+        elif action == "sell_hotel" and info.get("can_sell_hotel"):
+            prop.sell_hotel(player)
         else:
             print(f"{player.name} skipped building on {prop.name}.")
         self.pending_build = None

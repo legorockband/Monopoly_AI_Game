@@ -533,28 +533,35 @@ def draw_build_modal(screen:pygame.Surface, game, title_font, body_font, cx, cy)
     if not info: return None, None, None
     prop = info["property"]; player = info["player"]
     can_house = info["can_house"]; can_hotel = info["can_hotel"]
+    can_sell_house = info.get("can_sell_house", False)
+    can_sell_hotel = info.get("can_sell_hotel", False)
 
-    # Main card
-    w,h = 420, 240
+    # Main card (old 420, 240 for w,h)
+    w,h = 700, 260
+    w,h = 700, 360
     x,y = cx - w//2, cy - h//2
     pygame.draw.rect(screen, (255,255,224), (x,y,w,h))
     pygame.draw.rect(screen, (0,0,0), (x,y,w,h), 2)
 
     # Text on card
-    t = title_font.render("Build on Your Property?", True, (0,0,0))
+    t = title_font.render("Manage Buildings", True, (0,0,0))
     screen.blit(t, (x+(w-t.get_width())//2, y+10))
     a = body_font.render(f"{prop.name}", True, (0,0,0))
     b = body_font.render(f"Houses: {prop.num_houses}  Hotel: {'Yes' if prop.has_hotel else 'No'}", True, (0,0,0))
-    c = body_font.render(f"Cost per build: ${prop.house_cost}", True, (0,0,0))
+    c = body_font.render(f"Build/Sell price per step: ${prop.house_cost}", True, (0,0,0))
     screen.blit(a, (x+20,y+60)); screen.blit(b,(x+20,y+90)); screen.blit(c,(x+20,y+120))
 
     # Buttons on card
     r_house = pygame.Rect(cx-180, cy+50, 120, 44)
     r_hotel = pygame.Rect(cx-60,  cy+50, 120, 44)
     r_skip  = pygame.Rect(cx+60,  cy+50, 120, 44)
+    r_sell_house = pygame.Rect(cx-180, cy+110, 120, 44)
+    r_sell_hotel = pygame.Rect(cx-60,  cy+110, 120, 44)
 
     pygame.draw.rect(screen, (0,150,0) if can_house else (120,120,120), r_house)
     pygame.draw.rect(screen, (150,100,0) if can_hotel else (120,120,120), r_hotel)
+    pygame.draw.rect(screen, (0,120,200) if can_sell_house else (120,120,120), r_sell_house)
+    pygame.draw.rect(screen, (0,120,200) if can_sell_hotel else (120,120,120), r_sell_hotel)
     pygame.draw.rect(screen, (150,0,0), r_skip)
 
     def center(lbl, rect):
@@ -562,7 +569,9 @@ def draw_build_modal(screen:pygame.Surface, game, title_font, body_font, cx, cy)
     center(body_font.render("BUY HOUSE", True, (255,255,255)), r_house)
     center(body_font.render("BUY HOTEL", True, (255,255,255)), r_hotel)
     center(body_font.render("SKIP", True, (255,255,255)), r_skip)
-    return r_house, r_hotel, r_skip
+    center(body_font.render("SELL HOUSE",  True, (255,255,255)), r_sell_house)
+    center(body_font.render("SELL HOTEL",  True, (255,255,255)), r_sell_hotel)
+    return r_house, r_hotel, r_skip, r_sell_house, r_sell_hotel
 
 def draw_tax_modal(screen:pygame.Surface, game, title_font, body_font, cx, cy):
     info = game.pending_tax
@@ -623,6 +632,20 @@ def trade_button(screen, value_font, center_pos, enable=True):
     screen.blit(lbl, (r.centerx - lbl.get_width()//2, r.centery - lbl.get_height()//2))
     return r
 
+def manage_button(screen, value_font, center_pos, enable=True):
+    """Draw a 'Manage' button above Trade; returns its rect."""
+    cx, cy = center_pos
+    cx = cx + 140
+    cy = cy - 90  # stack above Trade/End Turn
+    w, h = 140, 50
+    r = pygame.Rect(cx, cy, w, h)
+    color = (0, 120, 200) if enable else (160,160,160)
+    pygame.draw.rect(screen, color, r)
+    lbl = value_font.render("Manage", True, (0,0,0))
+    screen.blit(lbl, (r.centerx - lbl.get_width()//2, r.centery - lbl.get_height()//2))
+    return r
+
+
 def draw_trade_select_modal(screen, players, selected_idxs, cx, cy):
     """
     Modal: choose exactly two players.
@@ -671,6 +694,65 @@ def draw_trade_select_modal(screen, players, selected_idxs, cx, cy):
     screen.blit(c1, (confirm_rect.centerx - c1.get_width()//2, confirm_rect.centery - c1.get_height()//2))
     screen.blit(c2, (cancel_rect.centerx  - c2.get_width()//2,  cancel_rect.centery  - c2.get_height()//2))
     return btn_rects, confirm_rect, cancel_rect
+
+
+def draw_manage_select_modal(screen, player, board, cx, cy):
+    """
+    Modal: pick one of the current player's owned properties to manage.
+    Returns (prop_btn_rects:list[(Rect, property_obj)], cancel_rect:Rect)
+    """
+    import pygame
+    from game_test import Property, Railroad, Utility
+
+    title_font = pygame.font.SysFont("Arial", 24, bold=True)
+    body_font  = pygame.font.SysFont(None, 22)
+
+    # Shell
+    W, H = 640, 420
+    x, y = cx - W//2, cy - H//2
+    pygame.draw.rect(screen, (255,255,224), (x,y,W,H))
+    pygame.draw.rect(screen, (0,0,0), (x,y,W,H), 2)
+
+    t = title_font.render(f"Manage Buildings", True, (0,0,0))
+    screen.blit(t, (x + (W - t.get_width())//2, y + 12))
+
+    # Filter to real buildable properties (ignore RR/Utility)
+    owned_props = [sp for sp in player.properties_owned if isinstance(sp, Property)]
+    if not owned_props:
+        none_lbl = body_font.render("You do not own any color properties.", True, (120,0,0))
+        screen.blit(none_lbl, (x + (W - none_lbl.get_width())//2, y + 80))
+
+    # Grid of buttons
+    btns = []
+    bx, by = x + 20, y + 60
+    bw, bh = 280, 36
+    gap_x, gap_y = 20, 10
+    per_row = 2
+
+    for i, sp in enumerate(owned_props):
+        col = i % per_row
+        row = i // per_row
+        rx = bx + col * (bw + gap_x)
+        ry = by + row * (bh + gap_y)
+        r = pygame.Rect(rx, ry, bw, bh)
+        pygame.draw.rect(screen, (220,220,220), r, border_radius=8)
+        pygame.draw.rect(screen, (0,0,0), r, 2, border_radius=8)
+        name = body_font.render(sp.name, True, getattr(sp, "color_group", (0,0,0)))
+        screen.blit(name, (r.centerx - name.get_width()//2, r.centery - name.get_height()//2))
+        btns.append((r, sp))
+
+        # Small status (Houses/Hotel)
+        status = body_font.render(f"Houses: {sp.num_houses}  Hotel: {'Yes' if sp.has_hotel else 'No'}", True, (40,40,40))
+        screen.blit(status, (rx + 8, ry + bh + 2))
+
+    # Cancel
+    cancel_rect  = pygame.Rect(x + W//2 - 70, y + H - 60, 140, 44)
+    pygame.draw.rect(screen, (150,0,0), cancel_rect)
+    c2 = body_font.render("CANCEL",  True, (255,255,255))
+    screen.blit(c2, (cancel_rect.centerx - c2.get_width()//2,  cancel_rect.centery  - c2.get_height()//2))
+
+    return btns, cancel_rect
+
 
 def draw_trade_editor_modal(screen, p_left, p_right, offer, cx, cy):
     """
@@ -986,4 +1068,5 @@ def end_turn_button(screen:pygame.Surface, value_font, center_pos:tuple[int, int
     end_turn_text = value_font.render("End Turn", True, (0,0,0))
     screen.blit(end_turn_text, (cx + (width - end_turn_text.get_width())//2, cy + (height - end_turn_text.get_height())//2))
     return end_rect
+
 

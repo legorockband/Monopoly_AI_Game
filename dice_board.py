@@ -52,6 +52,7 @@ def running_display(num_players: int):
     player_idx = 0
     selected_space = None
 
+    manage_select_open = False
     trade_select_open = False         # player picker modal
     trade_selected = set()            # set of two indices
     trade_edit_open = False           # editor modal
@@ -120,15 +121,25 @@ def running_display(num_players: int):
                     r_house = pygame.Rect(cx - 180, cy + 50, 120, 44)
                     r_hotel = pygame.Rect(cx - 60,  cy + 50, 120, 44)
                     r_skip  = pygame.Rect(cx + 60,  cy + 50, 120, 44)
+                    r_sell_house = pygame.Rect(cx - 180, cy + 110, 120, 44)
+                    r_sell_hotel = pygame.Rect(cx -  60, cy + 110, 120, 44)
 
                     can_house = game.pending_build["can_house"]
                     can_hotel = game.pending_build["can_hotel"]
+                    can_sell_house  = game.pending_build.get("can_sell_house", False)
+                    can_sell_hotel  = game.pending_build.get("can_sell_hotel", False)
 
                     if r_house.collidepoint(mouse_pos) and can_house:
                         game.confirm_build("house")
 
                     elif r_hotel.collidepoint(mouse_pos) and can_hotel:
                         game.confirm_build("hotel")
+                    
+                    elif r_sell_house.collidepoint(mouse_pos) and can_sell_house:
+                         game.confirm_build("sell_house")
+
+                    elif r_sell_hotel.collidepoint(mouse_pos) and can_sell_hotel:
+                        game.confirm_build("sell_hotel")
 
                     elif r_skip.collidepoint(mouse_pos):
                         game.confirm_build("skip")
@@ -262,11 +273,50 @@ def running_display(num_players: int):
                             trade_selected.clear()
                     continue  # block others while selection is open
 
+                # --- MANAGE: selection modal blocks everything ---
+                if manage_select_open:
+                    cx, cy = board_center
+                    prop_btns, cancel_rect = board_test.draw_manage_select_modal(screen, game.players[player_idx], game.board, board_center[0], board_center[1])
+                    clicked_any = False
+                    for r, sp in prop_btns:
+                        if r.collidepoint(mouse_pos):
+                            # Compute flags for this property and open the same build modal
+                            p = game.players[player_idx]
+                            can_house, _ = sp.can_build_house(p, game.board)
+                            can_hotel, _ = sp.can_build_hotel(p, game.board)
+                            can_sell_house, _ = sp.can_sell_house(p, game.board)
+                            can_sell_hotel, _ = sp.can_sell_hotel(p, game.board)
+
+                            game.pending_build = {
+                                "player": p,
+                                "property": sp,
+                                "can_house": can_house,
+                                "can_hotel": can_hotel,
+                                "can_sell_house": can_sell_house,
+                                "can_sell_hotel": can_sell_hotel,
+                                "cost": sp.house_cost,
+                            }
+                            manage_select_open = False
+                            clicked_any = True
+                            break
+                    if not clicked_any:
+                        if cancel_rect.collidepoint(mouse_pos):
+                            manage_select_open = False
+                    continue  # block other clicks while manage picker is open
+
                 # --- Trade button click (only when no other modals are up) ---
                 if trade_rect and trade_rect.collidepoint(mouse_pos):
                     trade_select_open = True
                     trade_selected.clear()
                     continue
+
+                # --- Manage button click ---
+                if manage_rect and manage_rect.collidepoint(mouse_pos):
+                    # Only open if NOT in the middle of another decision
+                    if not (game.pending_build or game.pending_rent or game.pending_purchase or game.pending_tax or game.pending_jail or game.last_drawn_card or trade_select_open or trade_edit_open):
+                        manage_select_open = True
+                    continue
+
 
                 # End Turn button click
                 if end_rect and end_rect.collidepoint(mouse_pos):
@@ -323,6 +373,7 @@ def running_display(num_players: int):
         dice.make_dice_button(screen, circ_color, circ_center, circ_rad, enable=(not has_rolled or is_doubles))
         end_rect = board_test.end_turn_button(screen, value_font, circ_center, enable=can_end_turn())
         trade_rect = board_test.trade_button(screen, value_font, circ_center, enable=True)                
+        manage_rect = board_test.manage_button(screen, value_font, circ_center, enable=True)
 
         # Draw the houses or hotels 
         board_test.draw_property_build_badges(screen, game, space_rects)
@@ -331,15 +382,18 @@ def running_display(num_players: int):
         
         # Show the player stats
         player_cards.create_player_card(screen, game.players, player_idx, board_size, space_size, screen_width, screen_height)
-
+        
+        DICE_Y_NUDGE = -60
+        TOTAL_Y = 10
         # Show what chance card the player gets 
         if game.last_drawn_card:
             board_test.display_card(screen, game.players[player_idx - 1], game.last_drawn_card, board_size, screen_height)
 
         # Display dice roll and total 
         if rolled:
-            dice.draw_dice(screen, rolled, circ_center[0] - 200, circ_center[1] - 200)
-            dice.draw_total(screen, rolled, circ_center[0], circ_center[1] - 350, value_font)
+            dice_y = circ_center[1] - 200 + DICE_Y_NUDGE
+            dice.draw_dice(screen, rolled, circ_center[0] - 200, dice_y)
+            dice.draw_total(screen, rolled, circ_center[0], TOTAL_Y, value_font)
 
             if is_doubles:
                 doubles_text = value_font.render("You rolled doubles!", True, (0, 0, 0))
@@ -367,7 +421,13 @@ def running_display(num_players: int):
 
         elif selected_space is not None:
             board_test.property_characteristic(screen, selected_space, board_size, screen_height)
-        
+                
+        if manage_select_open:
+            board_test.draw_manage_select_modal(
+                screen, game.players[player_idx], game.board,
+                board_center[0], board_center[1]
+            )
+
         if trade_select_open:
             board_test.draw_trade_select_modal(screen, game.players, trade_selected, board_center[0], board_center[1])
 
