@@ -218,25 +218,7 @@ class Property(Space):
 
         else:
             print(f"  {player.name} landed on their own property, {self.name}.")
-            can_house, _ = self.can_build_house(player, board)
-            can_hotel, _ = self.can_build_hotel(player, board)
-            can_sell_house, _ = self.can_sell_house(player, board)
-            can_sell_hotel, _ = self.can_sell_hotel(player, board)
-            can_mortgage, _   = self.can_mortgage(player, board)
-            can_unmortgage, _ = self.can_unmortgage(player)
-            if (can_house or can_hotel or can_sell_hotel or can_sell_house 
-                or can_mortgage or can_unmortgage):
-                board.game.pending_build = {
-                    "player": player,
-                    "property": self,
-                    "can_house": can_house,
-                    "can_hotel": can_hotel,
-                    "can_sell_house": can_sell_house,
-                    "can_sell_hotel": can_sell_hotel,
-                    "can_mortgage": can_mortgage,
-                    "can_unmortgage": can_unmortgage,
-                    "cost": self.house_cost,
-                }
+            return
 
     def group_mates(self, board):
         """All properties in my color group (including me)."""
