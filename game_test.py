@@ -94,6 +94,13 @@ class Card:
                 game.board.spaces[player.position].land_on(player, game.board)
                 return
             
+            if self.target_space_index == 0:
+                player.position = 0
+                player.collect_money(200)
+                print(f"{player.name} advanced to GO and collected $200.")
+                game.board.spaces[player.position].land_on(player, game.board)
+                return
+
             #if passing GO
             if player.position > self.target_space_index: #passing GO unless target is GO 0 index itself
                 player.collect_money(200)
@@ -152,9 +159,12 @@ class GoSpace(Space):
     def __init__(self, name: str, index: int):
         super().__init__(name, index, "Go")
 
-    def land_on(self, player, board):
+    def land_on(self, player:Player, board):
         #super().land_on(player, board)
-        player.collect_money(200)
+        # if(player.position == 0):
+        #     player.collect_money(200)
+        # elif(player.position > 0):
+        #     player.collect_money(200)
         print(f"{self.name} landed on Go and Collected $200.")
 
 class Property(Space):
@@ -543,6 +553,7 @@ class Game:
         self.pending_rent = None
         self.pending_tax = None
         self.pending_jail = None
+        self.pending_jail_turn = None
 
         # Shuffle cards
         random.shuffle(self.chance_cards)
@@ -821,6 +832,63 @@ class Game:
                     print(f"\n--- Game Over! {self.players[0].name} is the winner! ---")
         else:
             print(f"  {player.name} could not roll doubles and remains in Jail.")
+
+    def start_jail_turn(self, player):
+        """Open the UI modal for jail options."""
+        self.pending_jail_turn = {"player": player}
+
+    def use_gojf_and_exit(self, player):
+        if player.get_out_of_jail_free_cards > 0:
+            player.get_out_of_jail_free_cards -= 1
+            player.in_jail = False
+            player.jail_turns = 0
+            player.position = self.board.jail_space_index   # Keep the player on the jail space 
+            print(f"{player.name} used a Get Out of Jail Free card and is now out of Jail.")
+            # roll_sum, _ = self.dice.roll()
+            # player.move(roll_sum, self.board)
+        else:
+            print(f"{player.name} has no Get Out of Jail Free card.")
+        self.pending_jail_turn = None
+
+    def pay_fine_and_exit(self, player):
+        if player.money >= 50:
+            player.pay_money(50)
+            player.in_jail = False
+            player.jail_turns = 0
+            player.position = self.board.jail_space_index   # Keep the player on the jail space 
+            print(f"{player.name} paid $50 and is now out of Jail.")
+            # roll_sum, _ = self.dice.roll()
+            # player.move(roll_sum, self.board)
+        else:
+            print(f"{player.name} cannot afford to pay $50.")
+        self.pending_jail_turn = None
+
+    def roll_for_doubles_from_jail(self, player):
+        print(f"  {player.name} attempts to roll for doubles to get out of Jail...")
+        player.jail_turns += 1
+        roll_sum, is_double = self.dice.roll()
+        if is_double:
+            player.in_jail = False
+            player.jail_turns = 0
+            print(f"  {player.name} rolled doubles and is now out of Jail!")
+            player.move(roll_sum, self.board)
+        elif player.jail_turns >= 3:
+            print(f"  {player.name} could not roll doubles on 3rd attempt. Must pay $50.")
+            if player.money >= 50:
+                player.pay_money(50)
+                player.in_jail = False
+                player.jail_turns = 0
+                print(f"  {player.name} paid $50 and is now out of Jail.")
+                player.move(roll_sum, self.board)
+            else:
+                print(f"  {player.name} cannot pay $50 and is bankrupt! Game Over for {player.name}.")
+                self.players.remove(player)
+                if len(self.players) == 1:
+                    self.game_over = True
+                    print(f"\n--- Game Over! {self.players[0].name} is the winner! ---")
+        else:
+            print(f"  {player.name} could not roll doubles and remains in Jail.")
+        self.pending_jail_turn = None
 
 if __name__ == "__main__":
 

@@ -105,6 +105,21 @@ def draw_owned_icons(surface, start_x, start_y, max_width, owned_counts):
             x = start_x
             y += line_height
 
+def draw_gojf_chip(surface, x, y, count, small=False):
+    if count <= 0:
+        return
+    W, H = (68, 24) if small else (96, 30)
+    rect = pygame.Rect(x, y, W, H)
+    # little ticket/card look
+    pygame.draw.rect(surface, (255, 255, 224), rect, border_radius=6)
+    pygame.draw.rect(surface, (0, 0, 0), rect, 2, border_radius=6)
+    # notch for vibe
+    pygame.draw.circle(surface, (255,255,224), (rect.left, rect.centery), 6)
+    pygame.draw.circle(surface, (0,0,0), (rect.left, rect.centery), 6, 2)
+    label = card_font.render(f"GOJF × {count}", True, (0, 0, 0))
+    surface.blit(label, (rect.centerx - label.get_width() // 2,
+                         rect.centery - label.get_height() // 2))
+
 def create_player_card(screen: pygame.Surface, player:list[Player], player_idx:int, board_size: int, space_size: int, screen_width: int, screen_height: int):
     card_width = screen_width - board_size
     card_height = space_size * 3
@@ -132,6 +147,14 @@ def create_player_card(screen: pygame.Surface, player:list[Player], player_idx:i
     money_text = money_font.render(f"- Money: ${money_value}", True, (0, 255, 0))
     screen.blit(money_text, (board_size + 10, starting_yPos + 10))
     
+    draw_gojf_chip(
+        screen,
+        board_size + 10,
+        starting_yPos + 46,  # just below the money line
+        current_player.get_out_of_jail_free_cards,
+        small=False
+    )
+
     # Render properties in columns
     line_h = 20  # vertical spacing
     padding_top = 45
@@ -178,6 +201,14 @@ def create_player_card(screen: pygame.Surface, player:list[Player], player_idx:i
 
         money_text = card_font.render(f"${next_money}", True, (0, 255, 0))
         screen.blit(money_text, (board_size + small_card_width * (i- 1) + 10, starting_small_yPos + 45))   
+
+        draw_gojf_chip(
+            screen,
+            board_size + small_card_width * (i - 1) + 10,
+            starting_small_yPos + 70,  # a bit under the money line
+            next_player.get_out_of_jail_free_cards,
+            small=True
+        )
 
         property_owned = next_player.properties_owned  
 

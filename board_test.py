@@ -30,7 +30,7 @@ spaces_names_2 = [
 ]
 
 corner_names_short = [
-    "GO", "Just Visiting", "Free Parking", "Go To Jail"
+    "GO", "Just Visiting/Jail", "Free Parking", "Go To Jail"
 ]
 
 def board_game(screen, font, board_size:int, corner_size:int, space_size:int):
@@ -65,112 +65,112 @@ def board_game(screen, font, board_size:int, corner_size:int, space_size:int):
     pygame.draw.rect(screen, (0, 0, 0), (corner_positions[3][0], corner_positions[3][1], corner_size, corner_size), 2)
 
     # Bottom row: Right to Left
+    inner = board_size - 2 * corner_size
     for idx in range(9):
-        x = board_size - corner_size - (idx + 1) * space_size
+        # default width for a tile
+        w = space_size
+        # for the LAST tile (next to the jail corner), absorb the leftover pixels
+        if idx == 8:
+            used = idx * space_size
+            w = inner - used  # leftover fits perfectly
+
+        # position this tile flush against the previous one from the right
+        # cumulative width up to this tile from the right:
+        prior = (idx * space_size) if idx < 8 else (inner - w)
+        x = board_size - corner_size - prior - w
         y = board_size - corner_size
 
-        rect = pygame.Rect(x, y, space_size, corner_size)
+        rect = pygame.Rect(x, y, w, corner_size)
         pygame.draw.rect(screen, (0,0,0), rect, 2)
-
-        # Save position of the current sqaure 
         space_rects[1 + idx] = rect
 
         color_value = spaces_names_2[idx][2]
+        if color_value is not None:
+            pygame.draw.rect(screen, color_value, (x, y, w, color_size))
+            pygame.draw.rect(screen, (0, 0, 0), (x, y, w, color_size), 2)
 
-        if color_value != None: 
-            pygame.draw.rect(screen, color_value, (x, y, space_size, color_size))  ## Color square
-            pygame.draw.rect(screen, (0, 0, 0), (x, y, space_size, color_size), 2) ## Border for the color square 
-
-        # Label All the Properties starting after Go and ending before Just Visting
+        # labels centered in this variable-width tile
         label = font.render(spaces_names_2[idx][0], True, (0, 0, 0))
-        rect = label.get_rect(center=(x + space_size // 2, y + 40 + space_size // 2))
-        screen.blit(label, rect)
+        screen.blit(label, label.get_rect(center=(x + w // 2, y + corner_size // 2 - 10)))
+        price = font.render(spaces_names_2[idx][1], True, (0, 0, 0))
+        screen.blit(price, price.get_rect(center=(x + w // 2, y + corner_size // 2 + 12)))
 
-        # Label for the cost of the property
-        label = font.render(spaces_names_2[idx][1], True, (0, 0, 0))
-        rect = label.get_rect(center=(x + space_size // 2, y + 60 + space_size // 2))
-        screen.blit(label, rect)
-
-    # Left row: Bottom to top 
+    # Left row: Bottom to top
     for i in range(9):
-        idx = 9 + i
+        h = space_size
+        if i == 8:
+            used = i * space_size
+            h = inner - used
+
+        prior = (i * space_size) if i < 8 else (inner - h)
         x = 0
-        y = board_size - corner_size - (i + 1) * space_size
-        rect = pygame.Rect(x, y, corner_size, space_size)
+        y = board_size - corner_size - prior - h
+
+        rect = pygame.Rect(x, y, corner_size, h)
         pygame.draw.rect(screen, (0,0,0), rect, 2)
+        space_rects[2 + (9 + i)] = rect  # positions 11..19
 
-        # Save position of the current sqaure 
-        space_rects[2 + idx] = rect
+        color_value = spaces_names_2[9 + i][2]
+        if color_value is not None:
+            band_x = x + corner_size - color_size
+            pygame.draw.rect(screen, color_value, (band_x, y, color_size, h))
+            pygame.draw.rect(screen, (0, 0, 0), (band_x, y, color_size, h), 2)
 
-        color_value = spaces_names_2[idx][2]
-
-        if color_value != None: 
-            pygame.draw.rect(screen, color_value, (x + corner_size - color_size, y, color_size, space_size))  ## Color square
-            pygame.draw.rect(screen, (0, 0, 0), (x + corner_size - color_size, y, color_size, space_size), 2) ## Border for the color square 
-
-        # Label All the Properties starting after Go and ending before Just Visting
-        label = font.render(spaces_names_2[idx][0], True, (0, 0, 0))
-        rect = label.get_rect(center=(x + 30 + space_size // 2, y + space_size // 2))
-        screen.blit(label, rect)
-
-        # Label for the cost of the property
-        label = font.render(spaces_names_2[idx][1], True, (0, 0, 0))
-        rect = label.get_rect(center=(x  - 15 + space_size // 2, y + space_size // 2))
-        screen.blit(label, rect)
+        label = font.render(spaces_names_2[9 + i][0], True, (0, 0, 0))
+        screen.blit(label, label.get_rect(center=(x + corner_size // 2, y + h // 2 - 10)))
+        price = font.render(spaces_names_2[9 + i][1], True, (0, 0, 0))
+        screen.blit(price, price.get_rect(center=(x + corner_size // 2, y + h // 2 + 12)))
 
     # Top Row: Left to right
     for i in range(9):
-        idx = 18 + i
-        x = corner_size + i * space_size
+        w = space_size
+        if i == 8:
+            used = i * space_size
+            w = inner - used
+
+        prior = (i * space_size) if i < 8 else (inner - w)
+        x = corner_size + prior
         y = 0
-        rect = pygame.Rect(x, y, space_size, corner_size)
+
+        rect = pygame.Rect(x, y, w, corner_size)
         pygame.draw.rect(screen, (0,0,0), rect, 2)
+        space_rects[3 + (18 + i)] = rect  # positions 21..29
 
-        # Save position of the current sqaure 
-        space_rects[3 + idx] = rect
+        color_value = spaces_names_2[18 + i][2]
+        if color_value is not None:
+            band_y = y + corner_size - color_size
+            pygame.draw.rect(screen, color_value, (x, band_y, w, color_size))
+            pygame.draw.rect(screen, (0, 0, 0), (x, band_y, w, color_size), 2)
 
-        color_value = spaces_names_2[idx][2]
-
-        if color_value != None: 
-            pygame.draw.rect(screen, color_value, (x, y + corner_size - color_size, space_size, color_size))  ## Color square
-            pygame.draw.rect(screen, (0, 0, 0), (x, y + corner_size - color_size, space_size, color_size), 2) ## Border for the color square 
-        
-        # Label All the Properties starting after Go and ending before Just Visting
-        label = font.render(spaces_names_2[idx][0], True, (0, 0, 0))
-        rect = label.get_rect(center=(x + space_size // 2, y + 15 + space_size // 2))
-        screen.blit(label, rect)
-        
-        # Label for the cost of the property
-        label = font.render(spaces_names_2[idx][1], True, (0, 0, 0))
-        rect = label.get_rect(center=(x + space_size // 2, y - 15 + space_size // 2))
-        screen.blit(label, rect)
+        label = font.render(spaces_names_2[18 + i][0], True, (0, 0, 0))
+        screen.blit(label, label.get_rect(center=(x + w // 2, y + corner_size // 2 - 10)))
+        price = font.render(spaces_names_2[18 + i][1], True, (0, 0, 0))
+        screen.blit(price, price.get_rect(center=(x + w // 2, y + corner_size // 2 + 12)))
 
     # Right row: Top to Bottom
     for i in range(9):
-        idx = 27 + i
+        h = space_size
+        if i == 8:
+            used = i * space_size
+            h = inner - used
+
+        prior = (i * space_size) if i < 8 else (inner - h)
         x = board_size - corner_size
-        y = corner_size + i * space_size
-        rect = pygame.Rect(x, y, corner_size, space_size)
+        y = corner_size + prior
+
+        rect = pygame.Rect(x, y, corner_size, h)
         pygame.draw.rect(screen, (0,0,0), rect, 2)
-        
-        # Save position of the current sqaure 
-        space_rects[4 + idx] = rect
+        space_rects[4 + (27 + i)] = rect  # positions 31..39
 
-        color_value = spaces_names_2[idx][2]
+        color_value = spaces_names_2[27 + i][2]
+        if color_value is not None:
+            pygame.draw.rect(screen, color_value, (x, y, color_size, h))
+            pygame.draw.rect(screen, (0, 0, 0), (x, y, color_size, h), 2)
 
-        if color_value != None: 
-            pygame.draw.rect(screen, color_value, (x, y, color_size, space_size))  ## Color square
-            pygame.draw.rect(screen, (0, 0, 0), (x, y, color_size, space_size), 2) ## Border for the color square 
-
-        # Label All the Properties starting after Go and ending before Just Visting
-        label = font.render(spaces_names_2[idx][0], True, (0, 0, 0))
-        rect = label.get_rect(center=(x + 25 + space_size // 2, y + space_size // 2))
-        screen.blit(label, rect)
-
-        # Label for the cost of the property
-        label = font.render(spaces_names_2[idx][1], True, (0, 0, 0))
-        rect = label.get_rect(center=(x + 60 + space_size // 2, y + space_size // 2))
-        screen.blit(label, rect)
+        label = font.render(spaces_names_2[27 + i][0], True, (0, 0, 0))
+        screen.blit(label, label.get_rect(center=(x + corner_size // 2, y + h // 2 - 10)))
+        price = font.render(spaces_names_2[27 + i][1], True, (0, 0, 0))
+        screen.blit(price, price.get_rect(center=(x + corner_size // 2, y + h // 2 + 12)))
 
     # Draw the visual decks for the chance and community chest cards
     draw_center_decks(screen, board_size, corner_size)
@@ -870,6 +870,57 @@ def draw_trade_editor_modal(screen, p_left, p_right, offer, cx, cy):
     rects["confirm"] = confirm_rect
     rects["cancel"]  = cancel_rect
     return rects
+
+def draw_jail_turn_choice_modal(screen, game, title_font, body_font, cx, cy):
+    """
+    Shows three buttons for a player who's starting/continuing a jail turn:
+    - Use Get Out of Jail Free (if any)
+    - Pay $50 (if they can afford it)
+    - Roll for Doubles
+    Returns a dict of rects: {"use":Rect or None, "pay":Rect or None, "roll":Rect}
+    """
+    info = getattr(game, "pending_jail_turn", None)
+    if not info:
+        return {"use": None, "pay": None, "roll": None}
+
+    p = info["player"]
+
+    w, h = 460, 240
+    x, y = cx - w//2, cy - h//2
+    pygame.draw.rect(screen, (255,255,224), (x,y,w,h))
+    pygame.draw.rect(screen, (0,0,0), (x,y,w,h), 2)
+
+    t = title_font.render("You're in Jail", True, (0,0,0))
+    s = body_font.render(f"{p.name}: choose how to get out", True, (0,0,0))
+    screen.blit(t, (x + (w - t.get_width())//2, y + 12))
+    screen.blit(s, (x + (w - s.get_width())//2, y + 48))
+
+    # Buttons / availability
+    can_use  = p.get_out_of_jail_free_cards > 0
+    can_pay  = p.money >= 50
+
+    r_use  = pygame.Rect(x + 20,       y + 90, 130, 46)
+    r_pay  = pygame.Rect(x + 20 + 150, y + 90, 130, 46)
+    r_roll = pygame.Rect(x + 20 + 300, y + 90, 130, 46)
+
+    def draw_btn(rect, label, enabled, bg_on=(0,150,0), bg_off=(150,150,150)):
+        pygame.draw.rect(screen, bg_on if enabled else bg_off, rect)
+        pygame.draw.rect(screen, (0,0,0), rect, 2)
+        lbl = body_font.render(label, True, (255,255,255))
+        screen.blit(lbl, (rect.centerx - lbl.get_width()//2,
+                          rect.centery - lbl.get_height()//2))
+
+    draw_btn(r_use,  "Use GOJF", can_use)
+    draw_btn(r_pay,  "Pay $50",  can_pay)
+    draw_btn(r_roll, "Roll",     True)
+
+    # Note about forced pay on 3rd attempt will still be enforced server-side logic
+    note = body_font.render(f"Jail turn: {p.jail_turns + 1} of 3", True, (40,40,40))
+    screen.blit(note, (x + (w - note.get_width())//2, y + h - 40))
+
+    return {"use": (r_use if can_use else None),
+            "pay": (r_pay if can_pay else None),
+            "roll": r_roll}
 
 def draw_property_build_badges(screen:pygame.Surface, game, space_rects):
     import pygame

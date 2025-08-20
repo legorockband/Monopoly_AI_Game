@@ -27,7 +27,11 @@ screen_width, screen_height = pygame.display.get_surface().get_size()
 # Properties of the board
 board_size = int(min(screen_height, (5/8) * screen_width))
 corner_size = board_size // 7
-space_size = (board_size - 1.9 * corner_size) // 9
+
+# Each edge has 9 spaces between corners
+inner = board_size - 2 * corner_size
+space_size = max(1, inner // 9)
+
 circ_center = (board_size + (screen_width - board_size)//2, 375)
 
 circ_rad = 50
@@ -161,7 +165,58 @@ def running_display(num_players: int):
                         p.jail_turns = 0
                         print(f"{p.name} has been moved to Jail.")
                         game.pending_jail = None
+
+                        # Advance to next player so the jail-choice modal won't appear this turn
+                        player_idx = (player_idx + 1) % num_players
+                        rolled = None
+                        is_doubles = False
+                        has_rolled = False
+
+                        # If the next player starts in jail, open their jail-turn modal now
+                        nxt = game.players[player_idx]
+                        if nxt.in_jail and not game.pending_jail_turn:
+                            game.start_jail_turn(nxt)
                     continue
+
+                # Jail-turn choice modal blocks everything else
+                if game.pending_jail_turn:
+                    cx, cy = board_center
+                    # Recreate rects for hit-testing to match the draw function layout
+                    rects = board_test.draw_jail_turn_choice_modal(
+                        screen, game, value_font, text_font, cx, cy
+                    )
+                    r_use, r_pay, r_roll = rects["use"], rects["pay"], rects["roll"]
+                    p = game.pending_jail_turn["player"]
+                    if r_use and r_use.collidepoint(mouse_pos):
+                        game.use_gojf_and_exit(p)
+                        # player is now free; keep their turn so they can roll from space 10
+                        rolled = None
+                        is_doubles = False
+                        has_rolled = False
+                        continue
+
+                    if r_pay and r_pay.collidepoint(mouse_pos):
+                        game.pay_fine_and_exit(p)
+                        # player is now free; keep their turn so they can roll from space 10
+                        rolled = None
+                        is_doubles = False
+                        has_rolled = False
+                        continue
+                    if r_roll and r_roll.collidepoint(mouse_pos):
+                        game.roll_for_doubles_from_jail(p)
+                        # If still in jail, their turn ends immediately; advance to next player
+                        rolled = (game.dice.die1_value, game.dice.die2_value)
+                        is_doubles = (rolled[0] == rolled[1])
+                        has_rolled = True
+                        if p.in_jail:
+                            player_idx = (player_idx + 1) % num_players
+                            is_doubles = False
+                            has_rolled = False
+                            nxt = game.players[player_idx]
+                            if nxt.in_jail and not game.pending_jail_turn:
+                                game.start_jail_turn(nxt)
+                        # If freed, they've already rolled & moved; let normal flow continue (may trigger other modals)
+                        continue
 
                 if selected_space is not None:
                     selected_space = None
@@ -275,6 +330,12 @@ def running_display(num_players: int):
                         rolled = None
                         is_doubles = False
                         has_rolled = False
+
+                        # Immediately show the jail choices 
+                        next_player = game.players[player_idx]
+                        if next_player.in_jail and not game.pending_jail_turn:
+                            game.start_jail_turn(next_player)
+
                     continue
 
                 if not dice.is_inside_circle(mouse_pos, circ_center, circ_rad):
@@ -283,16 +344,18 @@ def running_display(num_players: int):
                 player = game.players[player_idx]
                 
                 if player.in_jail:
-                    game.handle_jail_turn(player)
-                    if not player.in_jail and not (game.pending_purchase or game.pending_rent or game.pending_build):                      
-                        player_idx = (player_idx + 1) % num_players
+                    if not game.pending_jail_turn:
+                        game.start_jail_turn(player)
                     continue
                 
                 # If you have haven't rolled yet or you have doubles, you can yoll again
-                if not has_rolled or is_doubles:
+                if (not has_rolled or is_doubles) and not player.in_jail:
                     roll_total, is_doubles = game.dice.roll()
                     has_rolled = True
                     rolled = (game.dice.die1_value, game.dice.die2_value)
+                    # rolled = (5,5)
+                    # is_doubles = True
+                    # roll_total = 30
                     player.move(roll_total, game.board)
 
                 # What the do if there are doubles 
@@ -319,8 +382,12 @@ def running_display(num_players: int):
         # Draw the Board
         space_rects = board_test.board_game(screen, text_font, board_size, corner_size, space_size)
 
+        current_player = game.players[player_idx]
+
+        enable_dice = ((not has_rolled or is_doubles) and not current_player.in_jail)
+
         # Make interactable buttons
-        dice.make_dice_button(screen, circ_color, circ_center, circ_rad, enable=(not has_rolled or is_doubles))
+        dice.make_dice_button(screen, circ_color, circ_center, circ_rad, enable=enable_dice)
         end_rect = board_test.end_turn_button(screen, value_font, circ_center, enable=can_end_turn())
         trade_rect = board_test.trade_button(screen, value_font, circ_center, enable=True)                
 
@@ -334,7 +401,7 @@ def running_display(num_players: int):
 
         # Show what chance card the player gets 
         if game.last_drawn_card:
-            board_test.display_card(screen, game.players[player_idx - 1], game.last_drawn_card, board_size, screen_height)
+            board_test.display_card(screen, game.players[player_idx], game.last_drawn_card, board_size, screen_height)
 
         # Display dice roll and total 
         if rolled:
@@ -365,6 +432,9 @@ def running_display(num_players: int):
         elif game.pending_jail:
             board_test.draw_jail_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
+        elif game.pending_jail_turn:
+            board_test.draw_jail_turn_choice_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
+
         elif selected_space is not None:
             board_test.property_characteristic(screen, selected_space, board_size, screen_height)
         
@@ -391,5 +461,5 @@ def running_display(num_players: int):
 
 if __name__ == "__main__":
     #num_players = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
-    num_players = 4
+    num_players = 2
     running_display(num_players)
