@@ -85,7 +85,10 @@ class Card:
         if self.action_type == "collect_money":
             player.collect_money(self.value)
         elif self.action_type == "pay_money":
-            player.pay_money(self.value)
+            if player.money >= self.value:
+                player.pay_money(self.value)
+            else:
+                game.start_debt(player, self.value, creditor=None, reason=f"Card: {self.description}")
         elif self.action_type == "move_to":
             
             if self.target_space_index == -3:
@@ -219,7 +222,10 @@ class Property(Space):
             can_hotel, _ = self.can_build_hotel(player, board)
             can_sell_house, _ = self.can_sell_house(player, board)
             can_sell_hotel, _ = self.can_sell_hotel(player, board)
-            if can_house or can_hotel or can_sell_hotel or can_sell_house:
+            can_mortgage, _   = self.can_mortgage(player, board)
+            can_unmortgage, _ = self.can_unmortgage(player)
+            if (can_house or can_hotel or can_sell_hotel or can_sell_house 
+                or can_mortgage or can_unmortgage):
                 board.game.pending_build = {
                     "player": player,
                     "property": self,
@@ -227,6 +233,8 @@ class Property(Space):
                     "can_hotel": can_hotel,
                     "can_sell_house": can_sell_house,
                     "can_sell_hotel": can_sell_hotel,
+                    "can_mortgage": can_mortgage,
+                    "can_unmortgage": can_unmortgage,
                     "cost": self.house_cost,
                 }
 
@@ -241,6 +249,8 @@ class Property(Space):
         if self.has_hotel: return (False, "Already a hotel")
         if not owner.has_monopoly(self.color_group, board):
             return(False, "Need monpoly")
+        if any(p.is_mortgaged for p in self.group_mates(board)):
+            return (False, "Unmortgage the whole set first")
         
         group = self.group_mates(board)
         no_hotel = [p for p in group if not p.has_hotel]
@@ -256,6 +266,8 @@ class Property(Space):
     def can_build_hotel(self, owner, board):
         if self.owner != owner: return (False, "Not owner")
         if self.is_mortgaged: return (False, "Mortgaged")
+        if any(p.is_mortgaged for p in self.group_mates(board)):
+            return (False, "Unmortgage the whole set first")
         if self.has_hotel: return (False, "Already a hotel")
         if not owner.has_monopoly(self.color_group, board):
             return (False, "Need monopoly")
@@ -263,7 +275,9 @@ class Property(Space):
             return (False, "Need 4 houses here first")
         if owner.money < self.house_cost:
             return (False, "Not enough cash")
+
         return (True, "")
+
     
     def build_house(self, owner):
         owner.pay_money(self.house_cost)
@@ -311,6 +325,46 @@ class Property(Space):
         self.num_houses = 4
         print(f"{owner.name} sold a HOTEL on {self.name} (now 4 houses).")
 
+    def can_mortgage(self, owner, board):
+        """Owner may mortgage only if this title is unmortgaged, owned by them,
+        and the entire color set has NO houses/hotels."""
+        if self.owner != owner:
+            return (False, "Not owner")
+        if self.is_mortgaged:
+            return (False, "Already mortgaged")
+        # cannot have improvements anywhere in the set
+        for p in self.group_mates(board):
+            if p.num_houses > 0 or p.has_hotel:
+                return (False, "Remove houses/hotels from the whole set first")
+        return (True, "")
+
+    def can_unmortgage(self, owner):
+        if self.owner != owner:
+            return (False, "Not owner")
+        if not self.is_mortgaged:
+            return (False, "Not mortgaged")
+        payoff = int(round(self.mortgage_value * 1.10))
+        if owner.money < payoff:
+            return (False, f"Need ${payoff} to unmortgage")
+        return (True, "")
+
+    def mortgage(self, owner):
+        ok, _ = self.can_mortgage(owner, owner.board if hasattr(owner, "board") else None)
+        # we trust UI/Game to check; still keep it safe:
+        self.is_mortgaged = True
+        owner.collect_money(self.mortgage_value)
+        print(f"{owner.name} mortgaged {self.name} for ${self.mortgage_value}.")
+
+    def unmortgage(self, owner):
+        payoff = int(round(self.mortgage_value * 1.10))
+        self.is_mortgaged = False
+        owner.pay_money(payoff)
+        print(f"{owner.name} unmortgaged {self.name} by paying ${payoff}.")
+
+
+
+
+
 class Railroad(Space):
     """Represents a Railroad property."""
     def __init__(self, name: str, index: int, cost: int, mortgage_value: int):
@@ -355,6 +409,30 @@ class Railroad(Space):
                 print(f"  {self.name} is mortgaged, no rent due.")
         else:
             print(f"  {player.name} landed on their own railroad, {self.name}.")
+    
+    def can_mortgage(self, owner, board=None):
+        if self.owner != owner: return (False, "Not owner")
+        if self.is_mortgaged:   return (False, "Already mortgaged")
+        return (True, "")
+
+    def can_unmortgage(self, owner):
+        if self.owner != owner:     return (False, "Not owner")
+        if not self.is_mortgaged:   return (False, "Not mortgaged")
+        payoff = int(round(self.mortgage_value * 1.10))
+        if owner.money < payoff:    return (False, f"Need ${payoff}")
+        return (True, "")
+
+    def mortgage(self, owner):
+        self.is_mortgaged = True
+        owner.collect_money(self.mortgage_value)
+        print(f"{owner.name} mortgaged {self.name} for ${self.mortgage_value}.")
+
+    def unmortgage(self, owner):
+        payoff = int(round(self.mortgage_value * 1.10))
+        self.is_mortgaged = False
+        owner.pay_money(payoff)
+        print(f"{owner.name} unmortgaged {self.name} by paying ${payoff}.")
+
 
 class Utility(Space):
     def __init__(self, name: str, index: int, cost: int, mortgage_value: int):
@@ -402,6 +480,30 @@ class Utility(Space):
                 print(f"  {self.name} is mortgaged, no rent due.")
         else:
             print(f"  {player.name} landed on their own utility, {self.name}.")
+
+
+    def can_mortgage(self, owner, board=None):
+        if self.owner != owner: return (False, "Not owner")
+        if self.is_mortgaged:   return (False, "Already mortgaged")
+        return (True, "")
+
+    def can_unmortgage(self, owner):
+        if self.owner != owner:     return (False, "Not owner")
+        if not self.is_mortgaged:   return (False, "Not mortgaged")
+        payoff = int(round(self.mortgage_value * 1.10))
+        if owner.money < payoff:    return (False, f"Need ${payoff}")
+        return (True, "")
+
+    def mortgage(self, owner):
+        self.is_mortgaged = True
+        owner.collect_money(self.mortgage_value)
+        print(f"{owner.name} mortgaged {self.name} for ${self.mortgage_value}.")
+
+    def unmortgage(self, owner):
+        payoff = int(round(self.mortgage_value * 1.10))
+        self.is_mortgaged = False
+        owner.pay_money(payoff)
+        print(f"{owner.name} unmortgaged {self.name} by paying ${payoff}.")
 
 class TaxSpace(Space):
     def __init__(self, name: str, index: int, tax_amount: int):
@@ -568,6 +670,8 @@ class Game:
     def __init__(self, player_names: list):
         self.board = Board(self)
         self.players = [Player(name) for name in player_names]
+        for p in self.players:
+            p.board = self.board
         
         self.current_player_index = 0
         self.turn_number = 0
@@ -582,6 +686,7 @@ class Game:
         self.pending_rent = None
         self.pending_tax = None
         self.pending_jail = None
+        self.pending_debt = None
 
         # Shuffle cards
         random.shuffle(self.chance_cards)
@@ -620,6 +725,69 @@ class Game:
             cards.append(Card("You inherit $100.", "Community Chest", "collect_money", value=100))
 
         return cards
+    
+    def declare_bankruptcy(self, debtor, creditor=None):
+        """Remove debtor from the game, transfer assets to creditor (or bank)."""
+        from game_test import Property  # safe in same file; ensures isinstance works
+
+        # 1) Liquidate buildings to BANK at half price; give proceeds to creditor
+        proceeds = 0
+        for sp in list(debtor.properties_owned):
+            if isinstance(sp, Property):
+                # hotel (worth 5 half-house steps in our model), plus any remaining houses
+                if sp.has_hotel:
+                    proceeds += (sp.house_cost // 2) * 5
+                    sp.has_hotel = False
+                    sp.num_houses = 0
+                else:
+                    proceeds += (sp.house_cost // 2) * sp.num_houses
+                    sp.num_houses = 0
+
+            # 2) Transfer title to creditor or back to bank
+            if creditor:
+                sp.owner = creditor
+                creditor.properties_owned.append(sp)
+            else:
+                sp.owner = None
+        debtor.properties_owned.clear()
+
+        # 3) Transfer GOJF cards
+        if creditor and debtor.get_out_of_jail_free_cards > 0:
+            creditor.get_out_of_jail_free_cards += debtor.get_out_of_jail_free_cards
+        debtor.get_out_of_jail_free_cards = 0
+
+        # 4) Give liquidation proceeds to creditor
+        if creditor and proceeds > 0:
+            creditor.collect_money(proceeds)
+
+        # 5) Clear any pending items involving debtor
+        if self.pending_rent and (self.pending_rent.get("player") is debtor or self.pending_rent.get("owner") is debtor):
+            self.pending_rent = None
+        if self.pending_purchase and self.pending_purchase.get("player") is debtor:
+            self.pending_purchase = None
+        if self.pending_build and self.pending_build.get("player") is debtor:
+            self.pending_build = None
+        if self.pending_tax and self.pending_tax.get("player") is debtor:
+            self.pending_tax = None
+        if self.pending_jail and self.pending_jail.get("player") is debtor:
+            self.pending_jail = None
+        if self.pending_debt and self.pending_debt.get("player") is debtor:
+            self.pending_debt = None
+
+        # 6) Remove player from the game
+        if debtor in self.players:
+            self.players.remove(debtor)
+
+        # 7) Win check
+        if len(self.players) == 1:
+            self.game_over = True
+            print(f"\n--- Game Over! {self.players[0].name} is the winner! ---")
+
+    def start_debt(self, player, amount, creditor=None, reason=""):
+        self.pending_debt = {"player": player, "amount": amount, "creditor": creditor, "reason": reason}
+    def clear_debt(self):
+        self.pending_debt = None
+
 
     def _transfer_property(self, prop, giver, receiver):
         """Move prop from giver to receiver, keeping houses/hotel state intact."""
@@ -704,6 +872,10 @@ class Game:
             prop.sell_house(player)
         elif action == "sell_hotel" and info.get("can_sell_hotel"):
             prop.sell_hotel(player)
+        elif action == "mortgage" and info.get("can_mortgage"):
+            prop.mortgage(player)
+        elif action == "unmortgage" and info.get("can_unmortgage"):
+            prop.unmortgage(player)
         else:
             print(f"{player.name} skipped building on {prop.name}.")
         self.pending_build = None
@@ -712,8 +884,23 @@ class Game:
         info = getattr(self, "pending_tax", None)
         if not info: return
         p = info["player"]; amt = info["amount"]
-        p.pay_money(amt)
+        if p.money >= amt:
+            p.pay_money(amt)
+        else:
+            self.start_debt(p, amt, creditor=None, reason="Tax")
         self.pending_tax = None
+
+    def settle_rent(self):
+        info = self.pending_rent
+        if not info: return
+        p, o, amt = info["player"], info["owner"], info["amount"]
+        if p.money >= amt:
+            p.pay_money(amt)
+            o.collect_money(amt)
+        else:
+            self.start_debt(p, amt, creditor=o, reason=f"Rent: {info['property'].name}")
+        self.pending_rent = None
+
 
     def start_game(self):
         print("--- Monopoly Game Started! ---")

@@ -92,18 +92,45 @@ def running_display(num_players: int):
                             game.community_chest_cards.append(card)
 
                     continue
+                # --- DEBT MODAL (blocks all other clicks while open) ---
+                if game.pending_debt:
+                    info = game.pending_debt
+                    p   = info["player"]
+                    amt = info["amount"]
+                    cred = info["creditor"]  # could be None (Bank)
+
+                    cx, cy = board_center
+                    pay_r, bk_r, mg_r = board_test.draw_debt_modal(screen, game, value_font, text_font, cx, cy)
+
+                    if mg_r and mg_r.collidepoint(mouse_pos):
+                        # open Manage picker; debt stays pending
+                        manage_select_open = True
+                    elif pay_r and pay_r.collidepoint(mouse_pos):
+                        info = game.pending_debt
+                        p   = info["player"]; amt = info["amount"]; cred = info["creditor"]
+                        if p.money >= amt:
+                            p.pay_money(amt)
+                            if cred: cred.collect_money(amt)
+                            game.clear_debt()
+                    
+                    elif bk_r and bk_r.collidepoint(mouse_pos):
+                        info = game.pending_debt
+                        debtor = info["player"]; cred = info["creditor"]
+                        game.declare_bankruptcy(debtor, cred)
+                        game.clear_debt()
+                        # keep UI sane if the current player just disappeared
+                        if player_idx >= len(game.players):
+                            player_idx = 0
+                        manage_select_open = trade_select_open = trade_edit_open = False
+                        continue
+                    # block all other clicks
 
                 # Rent
                 if game.pending_rent:
                     cx, cy = board_center
                     pay_rect = pygame.Rect(cx - 55, cy + 30, 110, 44)
                     if pay_rect.collidepoint(mouse_pos):
-                        info = game.pending_rent
-                        debtor, owner, amount = info["player"], info["owner"], info["amount"]
-                        debtor.pay_money(amount)
-                        owner.collect_money(amount)
-                        game.pending_rent = None
-
+                        game.settle_rent()
                     # block all other clicks while modal is visible
                     continue
 
@@ -115,35 +142,26 @@ def running_display(num_players: int):
                         game.confirm_tax()
                     continue
 
-                # If BUILD modal is up: only allow HOUSE / HOTEL / SKIP
+                # If BUILD/MANAGE modal is up: only allow its buttons
                 if game.pending_build:
                     cx, cy = board_center
-                    r_house = pygame.Rect(cx - 180, cy + 50, 120, 44)
-                    r_hotel = pygame.Rect(cx - 60,  cy + 50, 120, 44)
-                    r_skip  = pygame.Rect(cx + 60,  cy + 50, 120, 44)
-                    r_sell_house = pygame.Rect(cx - 180, cy + 110, 120, 44)
-                    r_sell_hotel = pygame.Rect(cx -  60, cy + 110, 120, 44)
-
-                    can_house = game.pending_build["can_house"]
-                    can_hotel = game.pending_build["can_hotel"]
-                    can_sell_house  = game.pending_build.get("can_sell_house", False)
-                    can_sell_hotel  = game.pending_build.get("can_sell_hotel", False)
-
-                    if r_house.collidepoint(mouse_pos) and can_house:
-                        game.confirm_build("house")
-
-                    elif r_hotel.collidepoint(mouse_pos) and can_hotel:
-                        game.confirm_build("hotel")
-                    
-                    elif r_sell_house.collidepoint(mouse_pos) and can_sell_house:
-                         game.confirm_build("sell_house")
-
-                    elif r_sell_hotel.collidepoint(mouse_pos) and can_sell_hotel:
-                        game.confirm_build("sell_hotel")
-
-                    elif r_skip.collidepoint(mouse_pos):
-                        game.confirm_build("skip")
-
+                    rects = board_test.draw_build_modal(screen, game, value_font, text_font, cx, cy)
+                    if rects:  # click handling
+                        if rects["buy_house"].collidepoint(mouse_pos) and game.pending_build["can_house"]:
+                            game.confirm_build("house")
+                        elif rects["buy_hotel"].collidepoint(mouse_pos) and game.pending_build["can_hotel"]:
+                            game.confirm_build("hotel")
+                        elif rects["sell_house"].collidepoint(mouse_pos) and game.pending_build.get("can_sell_house"):
+                            game.confirm_build("sell_house")
+                        elif rects["sell_hotel"].collidepoint(mouse_pos) and game.pending_build.get("can_sell_hotel"):
+                            game.confirm_build("sell_hotel")
+                        elif rects["mortgage"].collidepoint(mouse_pos) and game.pending_build.get("can_mortgage"):
+                            game.confirm_build("mortgage")
+                        elif rects["unmortgage"].collidepoint(mouse_pos) and game.pending_build.get("can_unmortgage"):
+                            game.confirm_build("unmortgage")
+                        elif rects["skip"].collidepoint(mouse_pos):
+                            game.confirm_build("skip")
+                    # block other clicks while this modal is open
                     continue
 
                 # If a purchase is pending, only handle BUY / SKIP clicks
@@ -286,6 +304,8 @@ def running_display(num_players: int):
                             can_hotel, _ = sp.can_build_hotel(p, game.board)
                             can_sell_house, _ = sp.can_sell_house(p, game.board)
                             can_sell_hotel, _ = sp.can_sell_hotel(p, game.board)
+                            can_mortgage, _    = sp.can_mortgage(p, game.board)
+                            can_unmortgage, _  = sp.can_unmortgage(p)
 
                             game.pending_build = {
                                 "player": p,
@@ -294,6 +314,8 @@ def running_display(num_players: int):
                                 "can_hotel": can_hotel,
                                 "can_sell_house": can_sell_house,
                                 "can_sell_hotel": can_sell_hotel,
+                                "can_mortgage": can_mortgage,
+                                "can_unmortgage": can_unmortgage,
                                 "cost": sp.house_cost,
                             }
                             manage_select_open = False
@@ -368,6 +390,7 @@ def running_display(num_players: int):
 
         # Draw the Board
         space_rects = board_test.board_game(screen, text_font, board_size, corner_size, space_size)
+        board_test.draw_mortgage_badges(screen, game, space_rects)
 
         # Make interactable buttons
         dice.make_dice_button(screen, circ_color, circ_center, circ_rad, enable=(not has_rolled or is_doubles))
@@ -418,6 +441,9 @@ def running_display(num_players: int):
         
         elif game.pending_jail:
             board_test.draw_jail_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
+
+        elif game.pending_debt:
+            board_test.draw_debt_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
         elif selected_space is not None:
             board_test.property_characteristic(screen, selected_space, board_size, screen_height)
