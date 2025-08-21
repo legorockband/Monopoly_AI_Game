@@ -469,10 +469,10 @@ def running_display(num_players: int):
                     player.doubles_rolled_consecutive = 0
 
         # Give Player 1 all properties
-        game.players[0].properties_owned = [game.board.spaces[i] for i in [1, 3, 5, 6, 8, 9, 11, 12, 13, 14, 15, 16, 18, 19, 21, 23, 24, 25, 26, 27, 28, 29, 31, 32, 34, 35, 37, 39]]
-        for prop in game.players[0].properties_owned:
-            prop.owner = game.players[0]
-            # prop.num_houses = 4
+        # game.players[0].properties_owned = [game.board.spaces[i] for i in [1, 3, 5, 6, 8, 9, 11, 12, 13, 14, 15, 16, 18, 19, 21, 23, 24, 25, 26, 27, 28, 29, 31, 32, 34, 35, 37, 39]]
+        # for prop in game.players[0].properties_owned:
+        #     prop.owner = game.players[0]
+        #     prop.num_houses = 4
 
         # Draw the Board
         space_rects = board_game(screen, text_font, board_size, corner_size, space_size)
