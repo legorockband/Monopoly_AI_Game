@@ -572,5 +572,5 @@ def running_display(num_players: int):
 
 if __name__ == "__main__":
     #num_players = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
-    num_players = 2
+    num_players = 4
     running_display(num_players)
