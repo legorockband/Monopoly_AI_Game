@@ -4,7 +4,7 @@ class Player:
     def __init__(self, name: str, color=(0,0,0)):
         self.name = name
         self.color = color
-        self.money = 1500
+        self.money = 15
         self.position = 0
         self.properties_owned = []
         self.in_jail = False
@@ -227,25 +227,25 @@ class Property(Space):
 
         else:
             print(f"  {player.name} landed on their own property, {self.name}.")
-            can_house, _ = self.can_build_house(player, board)
-            can_hotel, _ = self.can_build_hotel(player, board)
-            can_sell_house, _ = self.can_sell_house(player, board)
-            can_sell_hotel, _ = self.can_sell_hotel(player, board)
-            can_mortgage, _   = self.can_mortgage(player, board)
-            can_unmortgage, _ = self.can_unmortgage(player)
-            if (can_house or can_hotel or can_sell_hotel or can_sell_house 
-                or can_mortgage or can_unmortgage):
-                board.game.pending_build = {
-                    "player": player,
-                    "property": self,
-                    "can_house": can_house,
-                    "can_hotel": can_hotel,
-                    "can_sell_house": can_sell_house,
-                    "can_sell_hotel": can_sell_hotel,
-                    "can_mortgage": can_mortgage,
-                    "can_unmortgage": can_unmortgage,
-                    "cost": self.house_cost,
-                }
+            # can_house, _ = self.can_build_house(player, board)
+            # can_hotel, _ = self.can_build_hotel(player, board)
+            # can_sell_house, _ = self.can_sell_house(player, board)
+            # can_sell_hotel, _ = self.can_sell_hotel(player, board)
+            # can_mortgage, _   = self.can_mortgage(player, board)
+            # can_unmortgage, _ = self.can_unmortgage(player)
+            # if (can_house or can_hotel or can_sell_hotel or can_sell_house 
+            #     or can_mortgage or can_unmortgage):
+            #     board.game.pending_build = {
+            #         "player": player,
+            #         "property": self,
+            #         "can_house": can_house,
+            #         "can_hotel": can_hotel,
+            #         "can_sell_house": can_sell_house,
+            #         "can_sell_hotel": can_sell_hotel,
+            #         "can_mortgage": can_mortgage,
+            #         "can_unmortgage": can_unmortgage,
+            #         "cost": self.house_cost,
+            #     }
 
     def group_mates(self, board):
         """All properties in my color group (including me)."""
@@ -256,6 +256,7 @@ class Property(Space):
         if self.owner != owner: return (False, "Not owner")
         if self.is_mortgaged: return (False, "Mortgaged")
         if self.has_hotel: return (False, "Already a hotel")
+        if getattr(board.game, "houses_remaing", 0) <= 0: return (False, "No Houses Left")
         if not owner.has_monopoly(self.color_group, board):
             return(False, "Need monpoly")
     
@@ -285,17 +286,22 @@ class Property(Space):
             return (False, "Need 4 houses here first")
         if owner.money < self.house_cost:
             return (False, "Not enough cash")
+        if getattr(board.game, "hotels_remaing", 0) <= 0: return (False, "No Hotels Left")
+
         return (True, "")
-    
+
     def build_house(self, owner):
         owner.pay_money(self.house_cost)
         self.num_houses += 1
+        owner.board.game.houses_remaining -= 1
         print(f"{owner.name} built a house on {self.name} (now {self.num_houses}).")
     
     def build_hotel(self, owner):
         owner.pay_money(self.house_cost)
         self.num_houses = 0
         self.has_hotel = True
+        owner.board.game.hotels_remaining -= 1
+        owner.board.game.houses_remaining += 4
         print(f"{owner.name} built a HOTEL on {self.name}.")
 
     def can_sell_house(self, owner, board):
@@ -318,17 +324,22 @@ class Property(Space):
             return (False, "Not owner")
         if not self.has_hotel:
             return (False, "No hotel to sell")
+        if getattr(board.game, 'houses_remaining', 0) < 4: 
+            return (False, "Bank needs 4 houses available")
         return (True, "")
     
     # bank pays half the house price
     def sell_house(self, owner):
         owner.collect_money(self.house_cost // 2)
         self.num_houses = max(0, self.num_houses - 1)
+        owner.board.game.houses_remaining += 1
         print(f"{owner.name} sold a house on {self.name} (now {self.num_houses}).")
 
     # bank pays half the hotel price - hotel price equal the house price of color set
     def sell_hotel(self, owner):
         owner.collect_money(self.house_cost // 2)
+        owner.board.game.houses_remaing -= 4
+        owner.board.game.hotel_remaing += 1
         self.has_hotel = False
         self.num_houses = 4
         print(f"{owner.name} sold a HOTEL on {self.name} (now 4 houses).")
@@ -364,7 +375,8 @@ class Property(Space):
         print(f"{owner.name} mortgaged {self.name} for ${self.mortgage_value}.")
 
     def unmortgage(self, owner):
-        payoff = int(round(self.mortgage_value * 1.10))
+        import math
+        payoff = int(math.ceil(self.mortgage_value * 1.10))
         self.is_mortgaged = False
         owner.pay_money(payoff)
         print(f"{owner.name} unmortgaged {self.name} by paying ${payoff}.")
@@ -690,6 +702,9 @@ class Game:
         self.pending_jail = None
         self.pending_jail_turn = None
         self.pending_debt = None
+        self.pending_bankrupt_notice = None
+        self.houses_remaining = 32
+        self.hotels_remaining = 12
 
         # Shuffle cards
         random.shuffle(self.chance_cards)
@@ -781,6 +796,11 @@ class Game:
         if debtor in self.players:
             self.players.remove(debtor)
 
+        self.pending_bankrupt_notice = {
+            "debtor": debtor.name,
+            "creditor": (creditor.name if creditor else None)
+        }
+
         # 7) Win check
         if len(self.players) == 1:
             self.game_over = True
@@ -788,6 +808,7 @@ class Game:
 
     def start_debt(self, player, amount, creditor=None, reason=""):
         self.pending_debt = {"player": player, "amount": amount, "creditor": creditor, "reason": reason}
+    
     def clear_debt(self):
         self.pending_debt = None
 

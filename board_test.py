@@ -492,6 +492,7 @@ def draw_purchase_modal(screen:pygame.Surface, game, title_font, body_font, cent
     name_text = body_font.render(prop.name, True, (0,0,0))
     cost_text = body_font.render(f"Cost: ${prop.cost}", True, (0,0,0))
     who_text = body_font.render(f"Player: {player.name}", True, (0,0,0))
+    
     screen.blit(name_text, (x + 20, y + 60))
     screen.blit(cost_text, (x + 20, y + 90))
     screen.blit(who_text, (x + 20, y + 120))
@@ -544,6 +545,9 @@ def draw_build_modal(screen:pygame.Surface, game, title_font, body_font, cx, cy)
     # Main card
     w,h = 700, 360    
     x,y = cx - w//2, cy - h//2
+    but_gap_x = 130
+    but_gap_y = 60
+    but_x, but_y = cx - 240, cy + 50
     pygame.draw.rect(screen, (255,255,224), (x,y,w,h))
     pygame.draw.rect(screen, (0,0,0), (x,y,w,h), 2)
 
@@ -559,31 +563,43 @@ def draw_build_modal(screen:pygame.Surface, game, title_font, body_font, cx, cy)
     d = body_font.render(f"Mortgaged: {'Yes' if getattr(prop, 'is_mortgaged', False) else 'No'}", True, (150,0,0) if getattr(prop,'is_mortgaged',False) else (0,120,0))
     screen.blit(a, (x+20,y+60)); screen.blit(b, (x+20,y+90)); screen.blit(c, (x+20,y+120)); screen.blit(d, (x+20,y+150))
 
+    house_remain = body_font.render(
+        f"Bank: Houses Left {game.houses_remaining}", True, (0,0,0)
+    )
+    hotel_remain = body_font.render(
+        f"Bank: Hotel Left {game.hotels_remaining}", True, (0,0,0)
+    )
+
+    screen.blit(house_remain, (x+20, y+180))
+    screen.blit(hotel_remain, (x+20, y+180+house_remain.get_height()))
+
+    can_house = can_house and (game.houses_remaining > 0)       # NEW
+    can_hotel = can_hotel and (game.hotels_remaining > 0)       # NEW
+    can_sell_hotel = can_sell_hotel and (game.houses_remaining >= 4)
 
     # Buttons on card
-    r_house = pygame.Rect(cx-180, cy+50, 120, 44)
-    r_hotel = pygame.Rect(cx-60,  cy+50, 120, 44)
-    r_skip  = pygame.Rect(cx+60,  cy+50, 120, 44)
-    r_sell_house = pygame.Rect(cx-180, cy+110, 120, 44)
-    r_sell_hotel = pygame.Rect(cx-60,  cy+110, 120, 44)
+    r_house = pygame.Rect(but_x, but_y, 120, 44)
+    r_hotel = pygame.Rect(but_x + but_gap_x,  but_y, 120, 44)
+
+    r_sell_house = pygame.Rect(but_x, but_y + but_gap_y, 120, 44)
+    r_sell_hotel = pygame.Rect(but_x + but_gap_x,  but_y + but_gap_y, 120, 44)
+
 
     pygame.draw.rect(screen, (0,150,0) if can_house else (120,120,120), r_house)
     pygame.draw.rect(screen, (150,100,0) if can_hotel else (120,120,120), r_hotel)
     pygame.draw.rect(screen, (0,120,200) if can_sell_house else (120,120,120), r_sell_house)
     pygame.draw.rect(screen, (0,120,200) if can_sell_hotel else (120,120,120), r_sell_hotel)
-    pygame.draw.rect(screen, (150,0,0), r_skip)
 
     def center(lbl, rect):
         screen.blit(lbl, (rect.centerx - lbl.get_width()//2, rect.centery - lbl.get_height()//2))
     center(body_font.render("BUY HOUSE", True, (255,255,255)), r_house)
     center(body_font.render("BUY HOTEL", True, (255,255,255)), r_hotel)
-    center(body_font.render("SKIP", True, (255,255,255)), r_skip)
     center(body_font.render("SELL HOUSE",  True, (255,255,255)), r_sell_house)
     center(body_font.render("SELL HOTEL",  True, (255,255,255)), r_sell_hotel)
     
     # Mortgage / Unmortgage buttons
-    r_mortgage   = pygame.Rect(cx+40,  cy+50, 140, 44)
-    r_unmortgage = pygame.Rect(cx+40,  cy+110, 140, 44)
+    r_mortgage   = pygame.Rect(but_x + 2 * but_gap_x,  but_y, 140, 44)
+    r_unmortgage = pygame.Rect(but_x + 2 * but_gap_x,  but_y + but_gap_y, 140, 44)
 
     pygame.draw.rect(screen, (120,120,120) if not can_mortgage else (180,70,0), r_mortgage)
     pygame.draw.rect(screen, (120,120,120) if not can_unmortgage else (0,150,0), r_unmortgage)
@@ -683,9 +699,6 @@ def draw_manage_select_modal(screen, player, board, cx, cy):
     Modal: pick one of the current player's owned properties to manage.
     Returns (prop_btn_rects:list[(Rect, property_obj)], cancel_rect:Rect)
     """
-    import pygame
-    from game_test import Property, Railroad, Utility
-
     title_font = pygame.font.SysFont("Arial", 24, bold=True)
     body_font  = pygame.font.SysFont(None, 22)
 
@@ -719,8 +732,12 @@ def draw_manage_select_modal(screen, player, board, cx, cy):
         r = pygame.Rect(rx, ry, bw, bh)
         pygame.draw.rect(screen, (220,220,220), r, border_radius=8)
         pygame.draw.rect(screen, (0,0,0), r, 2, border_radius=8)
-        name = body_font.render(sp.name, True, getattr(sp, "color_group", (0,0,0)))
-        screen.blit(name, (r.centerx - name.get_width()//2, r.centery - name.get_height()//2))
+
+        text_w, text_h = body_font.size(sp.name)
+
+        blit_text_with_outline(screen, body_font, sp.name, (r.centerx - text_w//2, r.centery - text_h//2),
+                       getattr(sp, "color_group", (0,0,0)), outline_color=(0,0,0), outline_width=2)
+        
         btns.append((r, sp))
 
         # Small status (Houses/Hotel)
@@ -911,12 +928,17 @@ def draw_trade_editor_modal(screen, p_left, p_right, offer, cx, cy):
             # Text label
             color = getattr(sp, "color_group", (0,0,0))
             name_txt = trunc(sp.name, per_col_w - 28)
-            lbl = body_font.render(name_txt, True, color)
-            screen.blit(lbl, (box.right + 6, base_y))
 
+            if sp.type == "Utility":
+                color = (255, 255, 200)        # Light Yellow
+            elif sp.type == "Railroad":
+                color = (60, 60, 60)
+
+            blit_text_with_outline(screen, body_font, name_txt, (box.right + 6, base_y + 3),
+                       color, outline_color=(0,0,0), outline_width=1)
+        
             # Hit area covers box + text row for easy clicking
             hit = pygame.Rect(base_x, base_y, per_col_w, row_h)
-            # pygame.draw.rect(screen, (0,0,0), hit, 2)
             rects[f"box_{side}_{pid}"] = box
             rects[f"hit_{side}_{pid}"] = hit
 
@@ -1034,38 +1056,59 @@ def draw_jail_turn_choice_modal(screen, game, title_font, body_font, cx, cy):
             "pay": (r_pay if can_pay else None),
             "roll": r_roll}
 
-def draw_property_build_badges(screen:pygame.Surface, game, space_rects):
-    import pygame
-    GREEN = (0, 180, 0)   # houses
-    RED   = (220, 40, 40) # hotels
+def draw_property_build_badges(screen, game, space_rects):
+    """
+    Houses/hotel triangles:
+      - Apex still extends into the color strip (±15px) to touch the band
+      - Flat side alignment is FIXED by using a constant height from the strip
+      - Width along the strip adapts to fit N houses cleanly
+    """
+    HOUSE_COLOR = (0, 180, 0)
+    HOTEL_COLOR = (220, 40, 40)
 
-    size = 15  # triangle size; tweak to taste
-    gap  = 3   # spacing between multiple houses
-    pad  = 3   # padding away from the color band
-
+    # --- helpers ---
     def side_for_pos(pos:int):
-        # Matches how your board indexes map to edges
-        if   1  <= pos <= 9:   return "bottom"  # right->left along bottom edge
-        elif 11 <= pos <= 19:  return "left"    # bottom->top along left edge
-        elif 21 <= pos <= 29:  return "top"     # left->right along top edge
-        elif 31 <= pos <= 39:  return "right"   # top->bottom along right edge
+        if   1  <= pos <= 9:   return "bottom"  # band at TOP of tile (horizontal)
+        elif 11 <= pos <= 19:  return "left"    # band at RIGHT edge (vertical)
+        elif 21 <= pos <= 29:  return "top"     # band at BOTTOM of tile (horizontal)
+        elif 31 <= pos <= 39:  return "right"   # band at LEFT edge (vertical)
         return None
 
-    def tri_points(x, y, s, direction:str):
-        # Triangles pointing toward the board interior (apex points toward the color band)
-        if direction == "up":     # apex up
-            return [(x, y + s), (x + s/2, y), (x + s, y + s)]
-        if direction == "down":   # apex down
-            return [(x, y), (x + s/2, y + s), (x + s, y)]
-        if direction == "left":   # apex left
-            return [(x + s, y), (x, y + s/2), (x + s, y + s)]
-        if direction == "right":  # apex right
-            return [(x, y), (x + s, y + s/2), (x, y + s)]
+    def tri_from_apex(ax, ay, base_w, height, direction:str, apex_off:int=15):
+        """
+        Build an isosceles triangle given:
+          - apex on the band edge but nudged INTO the band by apex_off
+          - a BASE of width `base_w` that sits exactly `height` away from the band edge
+        `ay`/`ax` are the inner edge coordinates of the color strip.
+        """
+        bw = float(base_w)
+        h  = float(height)
+
+        if direction == "up":       # band above; apex goes upward into band
+            apex = (ax, ay - apex_off)
+            base_y = ay + h
+            return [(ax - bw/2, base_y), apex, (ax + bw/2, base_y)]
+
+        if direction == "down":     # band below; apex goes downward into band
+            apex = (ax, ay + apex_off)
+            base_y = ay - h
+            return [(ax - bw/2, base_y), apex, (ax + bw/2, base_y)]
+
+        if direction == "left":     # band on left; apex goes left into band
+            apex = (ax - apex_off, ay)
+            base_x = ax + h
+            return [(base_x, ay - bw/2), apex, (base_x, ay + bw/2)]
+
+        if direction == "right":    # band on right; apex goes right into band
+            apex = (ax + apex_off, ay)
+            base_x = ax - h
+            return [(base_x, ay - bw/2), apex, (base_x, ay + bw/2)]
+
         raise ValueError("bad direction")
 
     for pos, rect in space_rects.items():
         sp = game.board.spaces[pos]
-        if getattr(sp, "type", "") != "Property": 
+        if getattr(sp, "type", "") != "Property":
             continue
         if getattr(sp, "owner", None) is None:
             continue
@@ -1074,67 +1117,79 @@ def draw_property_build_badges(screen:pygame.Surface, game, space_rects):
         if side is None:
             continue
 
-        # Your color band is 1/4 of the short side on each tile — derive per-rect.
-        color_size = min(rect.width, rect.height) // 4
+        # Strip thickness (matches board drawing)
+        strip_thickness = min(rect.width, rect.height) // 4
+        pad = max(2, strip_thickness // 8)  # breathing room inside the tile
 
-        # Compute anchor & orientation so triangles sit just *inside* the band and point toward it.
-        if side == "bottom":
-            # band along the TOP of the tile; draw just below it, pointing UP
-            x0 = rect.left + pad
-            y0 = rect.top  + color_size - pad
-            if getattr(sp, "has_hotel", True):
-                x0 = x0 + color_size
-                y0 = y0 - 10
-            direction = "up"
-            def nth_xy(i):  # lay houses in a row
-                return x0 + i * (size + gap), y0
+        # FIX: constant triangle height from the band, so the flat side lines up everywhere
+        tri_height = max(6, strip_thickness - 2 * pad)
 
-        elif side == "top":
-            # band along the BOTTOM of the tile; draw just above it, pointing DOWN
-            x0 = rect.left + pad
-            y0 = rect.bottom - color_size + pad - size
-            if getattr(sp, "has_hotel", True):
-                x0 = x0 + color_size
-            direction = "down"
-            def nth_xy(i):
-                return x0 + i * (size + gap), y0
+        # Which edge + layout axis
+        if side in ("bottom", "top"):
+            # inner edge y and pointing dir
+            if side == "bottom":
+                apex_y = rect.top + strip_thickness
+                direction = "up"
+            else:
+                apex_y = rect.bottom - strip_thickness
+                direction = "down"
+            start_coord = rect.left + pad
+            end_coord   = rect.right - pad
+            axis = "x"
+        else:
+            if side == "left":
+                apex_x = rect.right - strip_thickness
+                direction = "right"
+            else:
+                apex_x = rect.left + strip_thickness
+                direction = "left"
+            start_coord = rect.top + pad
+            end_coord   = rect.bottom - pad
+            axis = "y"
 
-        elif side == "left":
-            # band along the RIGHT edge; draw just left of it, pointing RIGHT
-            x0 = rect.right - color_size + pad - size
-            y0 = rect.top + pad
-            if getattr(sp, "has_hotel", True):
-                y0 = y0 + color_size
-            direction = "right"
-            def nth_xy(i):  # stack vertically
-                return x0, y0 + i * (size + gap)
-
-        elif side == "right":
-            # band along the LEFT edge; draw just right of it, pointing LEFT
-            x0 = rect.left + color_size - pad
-            y0 = rect.top + pad
-            if getattr(sp, "has_hotel", True):
-                y0 = y0 + color_size
-                x0 = x0 - 10
-            direction = "left"
-            def nth_xy(i):
-                return x0, y0 + i * (size + gap)
-
-        # Draw hotel OR houses
-        if getattr(sp, "has_hotel", False):
-            # hotels: one red triangle, slightly larger
-            s = size + 10
-            pts = tri_points(x0, y0, s, direction)
-            pygame.draw.polygon(screen, RED, pts)
-            pygame.draw.polygon(screen, (0, 0, 0), pts, 1)
+        # Count to draw
+        n_houses = int(getattr(sp, "num_houses", 0))
+        has_hotel = bool(getattr(sp, "has_hotel", False))
+        count = 1 if has_hotel else min(4, n_houses)
+        if count == 0 and not has_hotel:
             continue
 
-        n = int(getattr(sp, "num_houses", 0))
-        for i in range(min(n, 4)):
-            xi, yi = nth_xy(i)
-            pts = tri_points(xi, yi, size, direction)
-            pygame.draw.polygon(screen, GREEN, pts)
-            pygame.draw.polygon(screen, (0, 0, 0), pts, 1)
+        # Width along the strip adapts to fit; gaps proportional to thickness
+        gap = max(2, strip_thickness // 5)
+        run_len = end_coord - start_coord
+        base_w_max_from_run = (run_len - (count - 1) * gap) / max(1, count)
+
+        # Keep base width reasonable versus height; don’t let it get needle-thin or super wide
+        base_w = int(max(6, min(base_w_max_from_run, tri_height * 1.2)))
+        if has_hotel:
+            base_w = int(base_w * 1.25)
+
+        # Center the group along the run
+        total_used = count * base_w + (count - 1) * gap
+        origin = start_coord + max(0, (run_len - total_used) // 2)
+
+        def centers_1d(o, c, w, g):
+            xs = []
+            p = o
+            for _ in range(c):
+                xs.append(int(p + w / 2))
+                p += w + g
+            return xs
+
+        if axis == "x":
+            xs = centers_1d(origin, count, base_w, gap)
+            for cx in xs:
+                color = HOTEL_COLOR if has_hotel else HOUSE_COLOR
+                pts = tri_from_apex(cx, apex_y, base_w, tri_height, direction, apex_off=15)
+                pygame.draw.polygon(screen, color, pts)
+                pygame.draw.polygon(screen, (0, 0, 0), pts, 1)
+        else:
+            ys = centers_1d(origin, count, base_w, gap)
+            for cy in ys:
+                color = HOTEL_COLOR if has_hotel else HOUSE_COLOR
+                pts = tri_from_apex(apex_x, cy, base_w, tri_height, direction, apex_off=15)
+                pygame.draw.polygon(screen, color, pts)
+                pygame.draw.polygon(screen, (0, 0, 0), pts, 1)
 
 def end_turn_button(screen:pygame.Surface, value_font, center_pos:tuple[int, int], enable:bool=True):
     cx,cy = center_pos
@@ -1175,7 +1230,11 @@ def draw_debt_modal(screen, game, title_font, body_font, cx, cy):
     who  = cred.name if cred else "Bank"
 
     w,h = 420, 220
+    but_w, but_h = 110, 44
+    
     x,y = cx - w//2, cy - h//2
+    but_x = x + 20
+    but_gap = 140
     pygame.draw.rect(screen, (255,255,224), (x,y,w,h)); pygame.draw.rect(screen,(0,0,0),(x,y,w,h),2)
 
     t = title_font.render("Debt Due", True, (0,0,0))
@@ -1185,9 +1244,9 @@ def draw_debt_modal(screen, game, title_font, body_font, cx, cy):
     c = body_font.render(f"Cash: ${p.money}", True, (0,0,0))
     screen.blit(a, (x+20,y+60)); screen.blit(b,(x+20,y+90)); screen.blit(c,(x+20,y+120))
 
-    pay_rect = pygame.Rect(x+40,  y+150, 140, 44)
-    manage_rect = pygame.Rect(x+170, y+160, 120, 44)
-    bk_rect  = pygame.Rect(x+240, y+150, 140, 44)
+    pay_rect = pygame.Rect(but_x,  y+150, but_w, but_h)
+    manage_rect = pygame.Rect(but_x + but_gap, y+150, but_w - 10, but_h)
+    bk_rect  = pygame.Rect(but_x + 2 * but_gap - 10, y+150, but_w, but_h)
     can_pay  = p.money >= amt
 
 
@@ -1202,3 +1261,56 @@ def draw_debt_modal(screen, game, title_font, body_font, cx, cy):
     screen.blit(ml, (manage_rect.centerx - ml.get_width()//2, manage_rect.centery - ml.get_height()//2))
     screen.blit(bl, (bk_rect.centerx  - bl.get_width()//2,  bk_rect.centery  - bl.get_height()//2))
     return pay_rect, bk_rect, manage_rect
+
+def draw_bankrupt_notice(screen, game, title_font, body_font, cx, cy):
+    info = getattr(game, "pending_bankrupt_notice", None)
+    if not info: 
+        return None
+    
+    debtor = info.get("debtor", "A player")
+    cred   = info.get("creditor", None)
+
+    w, h = 480, 200
+    x, y = cx - w // 2, cy - h // 2
+
+    # Card background
+    pygame.draw.rect(screen, (255, 255, 224), (x, y, w, h))
+    pygame.draw.rect(screen, (0, 0, 0), (x, y, w, h), 2)
+
+    # Title
+    title = title_font.render("Bankruptcy", True, (180, 0, 0))
+    screen.blit(title, (x + (w - title.get_width()) // 2, y + 10))
+
+    # Body text
+    body1 = body_font.render(f"{debtor} is bankrupt.", True, (0, 0, 0))
+    if cred:
+        body2 = body_font.render(f"All assets transferred to {cred}.", True, (0, 0, 0))
+    else:
+        body2 = body_font.render("All assets returned to the Bank.", True, (0, 0, 0))
+
+    screen.blit(body1, (x + 20, y + 70))
+    screen.blit(body2, (x + 20, y + 100))
+
+    # OK button
+    ok_rect = pygame.Rect(cx - 55, cy + 40, 110, 44)
+    pygame.draw.rect(screen, (0, 120, 200), ok_rect)
+    ok_lbl = body_font.render("OK", True, (255, 255, 255))
+    screen.blit(ok_lbl, (ok_rect.centerx - ok_lbl.get_width() // 2,
+                         ok_rect.centery - ok_lbl.get_height() // 2))
+
+    return ok_rect
+
+def blit_text_with_outline(surface, font, text, pos, color, outline_color=(0,0,0), outline_width=2):
+    x, y = pos
+    base = font.render(text, True, color)
+    if outline_width <= 0:
+        surface.blit(base, (x, y))
+        return
+    # draw outline by offsetting around the center
+    for dx in range(-outline_width, outline_width+1):
+        for dy in range(-outline_width, outline_width+1):
+            if dx*dx + dy*dy == 0:
+                continue
+            shadow = font.render(text, True, outline_color)
+            surface.blit(shadow, (x+dx, y+dy))
+    surface.blit(base, (x, y))

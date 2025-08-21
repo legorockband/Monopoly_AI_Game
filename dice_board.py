@@ -4,7 +4,7 @@ import os
 import ctypes
 
 import dice
-import board_test
+from board_test import *
 import title_screen
 import player_cards
 from game_test import Game
@@ -70,9 +70,10 @@ def running_display(num_players: int):
 
     def can_end_turn():
         # Check if you didn't roll doubles or in a popup menu
-        return has_rolled and (not is_doubles) and not (game.pending_build or game.pending_rent or game.pending_purchase or game.last_drawn_card or game.pending_debt or game.pending_jail_turn)
+        return has_rolled and (not is_doubles) and not (game.pending_build or game.pending_rent or game.pending_purchase or game.last_drawn_card or game.pending_debt or game.pending_jail_turn or game.pending_bankrupt_notice)
 
     while running:
+        # Check if any popups are going to happen
         def any_modal_open():
             return (
                 game.pending_purchase or game.pending_rent or game.pending_tax or
@@ -87,6 +88,7 @@ def running_display(num_players: int):
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 mouse_pos = event.pos
 
+                # Show the Chance/ CC Card
                 if game.last_drawn_card:
                     pending_card = game.pending_card
                     game.last_drawn_card = None
@@ -127,7 +129,7 @@ def running_display(num_players: int):
                 # If BUILD/MANAGE modal is up: only allow its buttons
                 if game.pending_build:
                     cx, cy = board_center
-                    rects = board_test.draw_build_modal(screen, game, value_font, text_font, cx, cy)
+                    rects = draw_build_modal(screen, game, value_font, text_font, cx, cy)
                     if rects:  # click handling
                         if rects["buy_house"].collidepoint(mouse_pos) and game.pending_build["can_house"]:
                             game.confirm_build("house")
@@ -148,7 +150,7 @@ def running_display(num_players: int):
 
                 # If a purchase is pending, only handle BUY / SKIP clicks
                 if game.pending_purchase:
-                    buy_rect, skip_rect = board_test.purchase_button_rects(board_center[0], board_center[1] + 55)
+                    buy_rect, skip_rect = purchase_button_rects(board_center[0], board_center[1] + 55)
                     affordable = game.pending_purchase.get("affordable", True)
 
                     if buy_rect.collidepoint(mouse_pos):
@@ -174,7 +176,7 @@ def running_display(num_players: int):
                         game.pending_jail = None
 
                         # Advance to next player so the jail-choice modal won't appear this turn
-                        player_idx = (player_idx + 1) % num_players
+                        player_idx = (player_idx + 1) % len(game.players)
                         rolled = None
                         is_doubles = False
                         has_rolled = False
@@ -189,7 +191,7 @@ def running_display(num_players: int):
                 if game.pending_jail_turn:
                     cx, cy = board_center
                     # Recreate rects for hit-testing to match the draw function layout
-                    rects = board_test.draw_jail_turn_choice_modal(
+                    rects = draw_jail_turn_choice_modal(
                         screen, game, value_font, text_font, cx, cy
                     )
                     r_use, r_pay, r_roll = rects["use"], rects["pay"], rects["roll"]
@@ -216,7 +218,7 @@ def running_display(num_players: int):
                         is_doubles = (rolled[0] == rolled[1])
                         has_rolled = True
                         if p.in_jail:
-                            player_idx = (player_idx + 1) % num_players
+                            player_idx = (player_idx + 1) % len(game.players)
                             is_doubles = False
                             has_rolled = False
                             nxt = game.players[player_idx]
@@ -233,7 +235,7 @@ def running_display(num_players: int):
                     cred = info["creditor"]  # could be None (Bank)
 
                     cx, cy = board_center
-                    pay_r, bk_r, mg_r = board_test.draw_debt_modal(screen, game, value_font, text_font, cx, cy)
+                    pay_r, bk_r, mg_r = draw_debt_modal(screen, game, value_font, text_font, cx, cy)
 
                     if mg_r and mg_r.collidepoint(mouse_pos):
                         # open Manage picker; debt stays pending
@@ -258,10 +260,21 @@ def running_display(num_players: int):
                         continue
                     # block all other clicks
 
+                if game.pending_bankrupt_notice:    
+                    cx, cy = board_center
+                    ok_rect = pygame.Rect(cx - 55, cy + 40, 110, 44)
+                    if ok_rect.collidepoint(mouse_pos):
+                        game.pending_bankrupt_notice = None
+                        rolled = None
+                        is_doubles = False
+                        has_rolled = False
+                    continue
+
                 if selected_space is not None:
                     selected_space = None
                     continue
 
+                # Clicked on a space when their isn't a popup
                 if not any_modal_open() and space_rects:  # populated below each frame
                     for pos, rect in space_rects.items():
                         if rect.collidepoint(mouse_pos):
@@ -337,7 +350,7 @@ def running_display(num_players: int):
                 # --- TRADE: selection modal blocks everything ---
                 if trade_select_open:
                     cx, cy = board_center
-                    btn_rects, confirm_rect, cancel_rect = board_test.draw_trade_select_modal(
+                    btn_rects, confirm_rect, cancel_rect = draw_trade_select_modal(
                         screen, game.players, trade_selected, cx, cy
                     )
                     for i, r in enumerate(btn_rects):
@@ -360,7 +373,7 @@ def running_display(num_players: int):
                 # --- MANAGE: selection modal blocks everything ---
                 if manage_select_open:
                     cx, cy = board_center
-                    prop_btns, cancel_rect = board_test.draw_manage_select_modal(screen, game.players[player_idx], game.board, board_center[0], board_center[1])
+                    prop_btns, cancel_rect = draw_manage_select_modal(screen, game.players[player_idx], game.board, board_center[0], board_center[1])
                     clicked_any = False
                     for r, sp in prop_btns:
                         if r.collidepoint(mouse_pos):
@@ -408,7 +421,7 @@ def running_display(num_players: int):
                 # End Turn button click
                 if end_rect and end_rect.collidepoint(mouse_pos):
                     if can_end_turn():
-                        player_idx = (player_idx + 1) % num_players
+                        player_idx = (player_idx + 1) % len(game.players)
                         rolled = None
                         is_doubles = False
                         has_rolled = False
@@ -450,7 +463,7 @@ def running_display(num_players: int):
                         rolled = None
                         is_doubles = False
                         has_rolled = False
-                        player_idx = (player_idx + 1) % num_players
+                        player_idx = (player_idx + 1) % len(game.players)
                 
                 else:
                     player.doubles_rolled_consecutive = 0
@@ -459,11 +472,11 @@ def running_display(num_players: int):
         game.players[0].properties_owned = [game.board.spaces[i] for i in [1, 3, 5, 6, 8, 9, 11, 12, 13, 14, 15, 16, 18, 19, 21, 23, 24, 25, 26, 27, 28, 29, 31, 32, 34, 35, 37, 39]]
         for prop in game.players[0].properties_owned:
             prop.owner = game.players[0]
-            prop.num_houses = 4
+            # prop.num_houses = 4
 
         # Draw the Board
-        space_rects = board_test.board_game(screen, text_font, board_size, corner_size, space_size)
-        board_test.draw_mortgage_badges(screen, game, space_rects)
+        space_rects = board_game(screen, text_font, board_size, corner_size, space_size)
+        draw_mortgage_badges(screen, game, space_rects)
 
         current_player = game.players[player_idx]
 
@@ -471,21 +484,21 @@ def running_display(num_players: int):
 
         # Make interactable buttons
         dice.make_dice_button(screen, circ_color, circ_center, circ_rad, enable=enable_dice)
-        end_rect = board_test.end_turn_button(screen, value_font, circ_center, enable=can_end_turn())
-        trade_rect = board_test.trade_button(screen, value_font, circ_center, enable=True)                
-        manage_rect = board_test.manage_button(screen, value_font, circ_center, enable=True)
+        end_rect = end_turn_button(screen, value_font, circ_center, enable=can_end_turn())
+        trade_rect = trade_button(screen, value_font, circ_center, enable=True)                
+        manage_rect = manage_button(screen, value_font, circ_center, enable=True)
 
         # Draw the houses or hotels 
-        board_test.draw_property_build_badges(screen, game, space_rects)
+        draw_property_build_badges(screen, game, space_rects)
 
-        board_test.move_player(screen, game.players, board_size, corner_size, space_size)
+        move_player(screen, game.players, board_size, corner_size, space_size)
         
         # Show the player stats
-        player_cards.create_player_card(screen, game.players, player_idx, board_size, space_size, screen_width, screen_height)
+        player_cards.create_player_card(screen, game.players, player_idx, board_size, space_size, screen_width, screen_height, game)
 
         # Show what chance card the player gets 
         if game.last_drawn_card:
-            board_test.display_card(screen, game.players[player_idx], game.last_drawn_card, board_size, screen_height)
+            display_card(screen, game.players[player_idx], game.last_drawn_card, board_size, screen_height)
 
         # Display dice roll and total 
         if rolled:
@@ -502,46 +515,51 @@ def running_display(num_players: int):
          
         # If there is a pending display, draw one of them 
         if game.pending_purchase:
-            board_test.draw_purchase_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
+            draw_purchase_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
         elif game.pending_rent: 
-            board_test.draw_rent_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
+            draw_rent_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
         elif game.pending_build:
-            board_test.draw_build_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
+            draw_build_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
         elif game.pending_tax:
-            board_test.draw_tax_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
+            draw_tax_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
         
         elif game.pending_jail:
-            board_test.draw_jail_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
+            draw_jail_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
         elif game.pending_jail_turn:
-            board_test.draw_jail_turn_choice_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
+            draw_jail_turn_choice_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
         elif game.pending_debt:
-            board_test.draw_debt_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
+            draw_debt_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
+
+        elif game.pending_bankrupt_notice:           
+            draw_bankrupt_notice(screen, game, value_font, text_font,
+                         board_center[0], board_center[1])
 
         elif selected_space is not None:
-            board_test.property_characteristic(screen, selected_space, board_size, screen_height)
+            property_characteristic(screen, selected_space, board_size, screen_height)
         
         if manage_select_open:
-            board_test.draw_manage_select_modal(
+            draw_manage_select_modal(
                 screen, game.players[player_idx], game.board,
                 board_center[0], board_center[1]
             )
 
         if trade_select_open:
-            board_test.draw_trade_select_modal(screen, game.players, trade_selected, board_center[0], board_center[1])
+            draw_trade_select_modal(screen, game.players, trade_selected, board_center[0], board_center[1])
 
         if trade_edit_open and trade_pair is not None:
             iL, iR = trade_pair
-            trade_editor_rects = board_test.draw_trade_editor_modal(
+            trade_editor_rects = draw_trade_editor_modal(
                 screen,
                 game.players[iL], game.players[iR],
                 trade_offer,
                 board_center[0], board_center[1]
             )
+        
         else:
             # Ensure stale rects are cleared when the editor closes
             trade_editor_rects = None

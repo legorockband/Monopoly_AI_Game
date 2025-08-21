@@ -10,16 +10,19 @@ COLOR_ORDER = [
     (255, 255, 0),   # Yellow
     (0, 255, 0),     # Green
     (0, 0, 139),     # Dark Blue
-    (0, 0, 0),       # Railroads
+    (60, 60, 60),    # Railroads
     (255, 255, 200)  # Utilies 
 ]
 
 COLOR_INDEX = {rgb: i for i, rgb in enumerate(COLOR_ORDER)}
 
-card_font = pygame.font.SysFont(None, 24)
+card_font = pygame.font.SysFont(None, 22)
 money_font = pygame.font.SysFont('Arial', 26)
 value_font = pygame.font.SysFont('Arial', 28)
 
+SQUARE_SIZE = 11
+SQUARE_GAP = 4        # gap between squares within the same color group
+GROUP_GAP = 10        # extra gap between different color groups
 
 def owned_prop_sort_key(s):
     # Properties first, by color order, then board index (stable)
@@ -38,21 +41,17 @@ def prop_text_color(space):
     if isinstance(space, Property):
         return space.color_group
     if isinstance(space, Railroad):
-        return (30, 30, 30)     # dark gray/black
+        return (60, 60, 60)     # dark gray/black
     if isinstance(space, Utility):
-        return (0, 0, 0)        # black
+        return (255, 255, 200)        # Light Yellow
     return (0, 0, 0)
-
-SQUARE_SIZE = 11
-SQUARE_GAP = 4        # gap between squares within the same color group
-GROUP_GAP = 10        # extra gap between different color groups
 
 def count_owned_items(properties):
     """Return a list of (type, color, count) in COLOR_ORDER order."""
     counts_list = []
     for color in COLOR_ORDER:
         # Detect type based on color
-        if color == (0, 0, 0):
+        if color == (60, 60, 60):
             count = sum(1 for p in properties if isinstance(p, Railroad))
             item_type = "railroad"
         elif color == (255, 255, 200):
@@ -120,12 +119,31 @@ def draw_gojf_chip(surface, x, y, count, small=False):
     surface.blit(label, (rect.centerx - label.get_width() // 2,
                          rect.centery - label.get_height() // 2))
 
-def create_player_card(screen: pygame.Surface, player:list[Player], player_idx:int, board_size: int, space_size: int, screen_width: int, screen_height: int):
+def blit_text_with_outline(surface, font, text, pos, color, outline_color=(0,0,0), outline_width=2):
+    x, y = pos
+    base = font.render(text, True, color)
+    if outline_width <= 0:
+        surface.blit(base, (x, y))
+        return
+    # draw outline by offsetting around the center
+    for dx in range(-outline_width, outline_width+1):
+        for dy in range(-outline_width, outline_width+1):
+            if dx*dx + dy*dy == 0:
+                continue
+            shadow = font.render(text, True, outline_color)
+            surface.blit(shadow, (x+dx, y+dy))
+    surface.blit(base, (x, y))
+
+def create_player_card(screen: pygame.Surface, player:list[Player], player_idx:int, board_size: int, space_size: int, screen_width: int, screen_height: int, game=None):
     card_width = screen_width - board_size
     card_height = space_size * 3
     starting_yPos = 475
 
-    small_card_width = card_width// (len(player) - 1)
+    if len(player) > 1:
+        small_card_width = card_width// (len(player) - 1)
+    else:
+        small_card_width = 0
+    
     small_card_height = screen_height - starting_yPos - card_height
     starting_small_yPos = starting_yPos + card_height
 
@@ -147,10 +165,17 @@ def create_player_card(screen: pygame.Surface, player:list[Player], player_idx:i
     money_text = money_font.render(f"- Money: ${money_value}", True, (0, 255, 0))
     screen.blit(money_text, (board_size + 10, starting_yPos + 10))
     
+    # if game is not None:   
+    #     pools_lbl = card_font.render(
+    #         f"Houses left: {game.houses_remaining}   Hotels left: {game.hotels_remaining}",
+    #         True, (255,255,255)
+    #     )
+    #     screen.blit(pools_lbl, (board_size + 10, starting_yPos + 36))
+
     draw_gojf_chip(
         screen,
-        board_size + 10,
-        starting_yPos + 46,  # just below the money line
+        board_size + card_width - 100,
+        starting_yPos + card_height - 40,  # just below the money line
         current_player.get_out_of_jail_free_cards,
         small=False
     )
@@ -178,17 +203,17 @@ def create_player_card(screen: pygame.Surface, player:list[Player], player_idx:i
             row = 0
 
         text_color = prop_text_color(prop)
-        line_text = card_font.render(f"- {prop.name}", True, text_color)
 
         # Calculate position based on col/row
-        x = board_size + padding_left + col * 220  # 200 px per column
+        x = board_size + padding_left + col * 190  # 200 px per column
         if col >= 1:
             y = starting_yPos + light_padding_top + row * line_h 
         else:
             y = starting_yPos + padding_top + row * line_h
-
-        screen.blit(line_text, (x, y))
-
+        
+        blit_text_with_outline(screen, card_font, f"- {prop.name}", (x, y),
+                       text_color, outline_color=(0,0,0), outline_width=1)
+        
         row += 1
 
     # Make smaller cards below the big one for every other player
@@ -202,14 +227,6 @@ def create_player_card(screen: pygame.Surface, player:list[Player], player_idx:i
         money_text = card_font.render(f"${next_money}", True, (0, 255, 0))
         screen.blit(money_text, (board_size + small_card_width * (i- 1) + 10, starting_small_yPos + 45))   
 
-        draw_gojf_chip(
-            screen,
-            board_size + small_card_width * (i - 1) + 10,
-            starting_small_yPos + 70,  # a bit under the money line
-            next_player.get_out_of_jail_free_cards,
-            small=True
-        )
-
         property_owned = next_player.properties_owned  
 
         # Sort the properties by the color 
@@ -219,6 +236,14 @@ def create_player_card(screen: pygame.Surface, player:list[Player], player_idx:i
         squares_area_x = board_size + small_card_width * (i - 1) + 10
         squares_area_y = starting_small_yPos + 75
         squares_area_w = small_card_width - 20
+
+        draw_gojf_chip(
+            screen,
+            board_size + small_card_width * (i - 1) + 10,
+            squares_area_y + 50,  # a bit under the money line
+            next_player.get_out_of_jail_free_cards,
+            small=True
+        )
 
         # Count only actual color properties (ignore railroads/utilities)
         color_counts = count_owned_items(property_owned)
