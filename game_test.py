@@ -4,7 +4,7 @@ class Player:
     def __init__(self, name: str, color=(0,0,0)):
         self.name = name
         self.color = color
-        self.money = 1500
+        self.money = 15
         self.position = 0
         self.properties_owned = []
         self.in_jail = False
@@ -690,6 +690,7 @@ class Game:
         self.current_player_index = 0
         self.turn_number = 0
         self.game_over = False
+        self.winner = None
         self.dice = Dice()
         self.chance_cards = self._initialize_cards("Chance")
         self.community_chest_cards = self._initialize_cards("Community Chest")
@@ -744,15 +745,28 @@ class Game:
 
         return cards
 
+    def _check_for_winner(self):
+        """If only one player remains (hasn't been removed via bankruptcy), end the game."""
+        active = [p for p in self.players if p is not None]
+        if len(active) == 1:
+            self.winner = active[0]
+            self.game_over = True
+            # Optional: freeze any pending UI popups
+            self.pending_purchase = None
+            self.pending_rent = None
+            self.pending_tax = None
+            self.pending_build = None
+            self.pending_jail = None
+            self.pending_jail_turn = None
+            self.pending_debt = None
+            self.pending_bankrupt_notice = None
+
     def declare_bankruptcy(self, debtor, creditor=None):
         """Remove debtor from the game, transfer assets to creditor (or bank)."""
-        from game_test import Property  # safe in same file; ensures isinstance works
-
-        # 1) Liquidate buildings to BANK at half price; give proceeds to creditor
+        # Liquidate buildings to BANK at half price; give proceeds to creditor
         proceeds = 0
         for sp in list(debtor.properties_owned):
             if isinstance(sp, Property):
-                # hotel (worth 5 half-house steps in our model), plus any remaining houses
                 if sp.has_hotel:
                     proceeds += (sp.house_cost // 2) * 5
                     sp.has_hotel = False
@@ -761,7 +775,7 @@ class Game:
                     proceeds += (sp.house_cost // 2) * sp.num_houses
                     sp.num_houses = 0
 
-            # 2) Transfer title to creditor or back to bank
+            # Transfer title to creditor or back to bank
             if creditor:
                 sp.owner = creditor
                 creditor.properties_owned.append(sp)
@@ -769,16 +783,12 @@ class Game:
                 sp.owner = None
         debtor.properties_owned.clear()
 
-        # 3) Transfer GOJF cards
+        # Transfer GOJF cards
         if creditor and debtor.get_out_of_jail_free_cards > 0:
             creditor.get_out_of_jail_free_cards += debtor.get_out_of_jail_free_cards
         debtor.get_out_of_jail_free_cards = 0
 
-        # 4) Give liquidation proceeds to creditor
-        if creditor and proceeds > 0:
-            creditor.collect_money(proceeds)
-
-        # 5) Clear any pending items involving debtor
+        # Clear any pending items involving debtor
         if self.pending_rent and (self.pending_rent.get("player") is debtor or self.pending_rent.get("owner") is debtor):
             self.pending_rent = None
         if self.pending_purchase and self.pending_purchase.get("player") is debtor:
@@ -792,18 +802,20 @@ class Game:
         if self.pending_debt and self.pending_debt.get("player") is debtor:
             self.pending_debt = None
 
-        # 6) Remove player from the game
+        # Remove player from the game (no None placeholders)
         if debtor in self.players:
             self.players.remove(debtor)
 
+        # Show a one-click notice for the UI to acknowledge
         self.pending_bankrupt_notice = {
             "debtor": debtor.name,
             "creditor": (creditor.name if creditor else None)
         }
 
-        # 7) Win check
+        # Win check
         if len(self.players) == 1:
             self.game_over = True
+            self.winner = self.players[0]
             print(f"\n--- Game Over! {self.players[0].name} is the winner! ---")
 
     def start_debt(self, player, amount, creditor=None, reason=""):

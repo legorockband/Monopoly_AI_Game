@@ -165,13 +165,6 @@ def create_player_card(screen: pygame.Surface, player:list[Player], player_idx:i
     money_text = money_font.render(f"- Money: ${money_value}", True, (0, 255, 0))
     screen.blit(money_text, (board_size + 10, starting_yPos + 10))
     
-    # if game is not None:   
-    #     pools_lbl = card_font.render(
-    #         f"Houses left: {game.houses_remaining}   Hotels left: {game.hotels_remaining}",
-    #         True, (255,255,255)
-    #     )
-    #     screen.blit(pools_lbl, (board_size + 10, starting_yPos + 36))
-
     draw_gojf_chip(
         screen,
         board_size + card_width - 100,

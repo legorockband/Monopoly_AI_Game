@@ -311,6 +311,8 @@ def move_player(screen:pygame.Surface, players, board_size:int, corner_size:int,
     # group players by board position
     groups = {}
     for p in players:
+        if p is None:                
+            continue
         groups.setdefault(p.position, []).append(p)
 
     for pos, group in groups.items():
@@ -1298,6 +1300,36 @@ def draw_bankrupt_notice(screen, game, title_font, body_font, cx, cy):
     screen.blit(ok_lbl, (ok_rect.centerx - ok_lbl.get_width() // 2,
                          ok_rect.centery - ok_lbl.get_height() // 2))
 
+    return ok_rect
+
+def draw_winner_modal(screen, game, title_font, body_font, cx, cy):
+    """
+    Big modal that announces the winner. Returns the OK button rect.
+    """
+    w, h = 560, 260
+    x, y = cx - w // 2, cy - h // 2
+
+    # Backdrop card
+    pygame.draw.rect(screen, (255, 255, 224), (x, y, w, h))
+    pygame.draw.rect(screen, (0, 0, 0), (x, y, w, h), 2)
+
+    title = title_font.render("Game Over", True, (0, 0, 0))
+    screen.blit(title, (x + (w - title.get_width()) // 2, y + 18))
+
+    if getattr(game, "winner", None) is not None:
+        name = game.winner.name
+        color = getattr(game.winner, "color", (0, 0, 0))
+        msg = body_font.render(f"{name} has won the game!", True, color)
+    else:
+        msg = body_font.render("We have a winner!", True, (0, 0, 0))
+
+    screen.blit(msg, (x + (w - msg.get_width()) // 2, y + 90))
+
+    ok_rect = pygame.Rect(cx - 70, cy + 60, 140, 48)
+    pygame.draw.rect(screen, (0, 120, 200), ok_rect)
+    ok_lbl = body_font.render("OK", True, (255, 255, 255))
+    screen.blit(ok_lbl, (ok_rect.centerx - ok_lbl.get_width() // 2,
+                         ok_rect.centery - ok_lbl.get_height() // 2))
     return ok_rect
 
 def blit_text_with_outline(surface, font, text, pos, color, outline_color=(0,0,0), outline_width=2):

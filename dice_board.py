@@ -72,6 +72,23 @@ def running_display(num_players: int):
         # Check if you didn't roll doubles or in a popup menu
         return has_rolled and (not is_doubles) and not (game.pending_build or game.pending_rent or game.pending_purchase or game.last_drawn_card or game.pending_debt or game.pending_jail_turn or game.pending_bankrupt_notice)
 
+    def advance_to_next():
+        nonlocal player_idx, rolled, is_doubles, has_rolled
+        if len(game.players) == 0:
+            return
+        # Step to next player
+        player_idx = (player_idx + 1) % len(game.players)
+        # Reset per-turn flags
+        rolled = None
+        is_doubles = False
+        has_rolled = False
+        # Keep the Game object’s index in sync in case any logic reads it
+        game.current_player_index = player_idx
+        # If next player is in jail, open their jail-turn modal immediately
+        nxt = game.players[player_idx]
+        if nxt.in_jail and not game.pending_jail_turn:
+            game.start_jail_turn(nxt)
+
     while running:
         # Check if any popups are going to happen
         def any_modal_open():
@@ -81,12 +98,22 @@ def running_display(num_players: int):
                 game.pending_debt or trade_select_open or trade_edit_open or
                 manage_select_open
             )
-        
+
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 mouse_pos = event.pos
+
+                # Winner modal blocks everything else
+                if game.game_over:
+                    cx, cy = board_center
+                    ok_rect = draw_winner_modal(screen, game, value_font, value_font, cx, cy)
+                    if ok_rect and ok_rect.collidepoint(mouse_pos):
+                        # Close the app (or you could jump back to a title screen if you have one)
+                        running = False
+                    continue
 
                 # Show the Chance/ CC Card
                 if game.last_drawn_card:
@@ -176,15 +203,7 @@ def running_display(num_players: int):
                         game.pending_jail = None
 
                         # Advance to next player so the jail-choice modal won't appear this turn
-                        player_idx = (player_idx + 1) % len(game.players)
-                        rolled = None
-                        is_doubles = False
-                        has_rolled = False
-
-                        # If the next player starts in jail, open their jail-turn modal now
-                        nxt = game.players[player_idx]
-                        if nxt.in_jail and not game.pending_jail_turn:
-                            game.start_jail_turn(nxt)
+                        advance_to_next()
                     continue
 
                 # Jail-turn choice modal blocks everything else
@@ -251,23 +270,40 @@ def running_display(num_players: int):
                     elif bk_r and bk_r.collidepoint(mouse_pos):
                         info = game.pending_debt
                         debtor = info["player"]; cred = info["creditor"]
+                        
+                        # Was the debtor the current player *before* we modify the list?
+                        was_current = (0 <= player_idx < len(game.players) and game.players[player_idx] is debtor)
+                        
                         game.declare_bankruptcy(debtor, cred)
                         game.clear_debt()
+
+                        # If the bankrupt player was the current player, the players list shrank
+                        # and player_idx now points at the next player. Start their turn fresh.
+                        if was_current and not game.game_over:
+                            rolled = None
+                            is_doubles = False
+                            has_rolled = False
+                            # If that next player starts in jail, open their jail modal now
+                            if 0 <= player_idx < len(game.players):
+                                nxt = game.players[player_idx]
+                                if nxt.in_jail and not game.pending_jail_turn:
+                                    game.start_jail_turn(nxt)
+
                         # keep UI sane if the current player just disappeared
                         if player_idx >= len(game.players):
                             player_idx = 0
+                        
                         manage_select_open = trade_select_open = trade_edit_open = False
+                        
+                        # block all other clicks
                         continue
-                    # block all other clicks
 
-                if game.pending_bankrupt_notice:    
+                if game.pending_bankrupt_notice:
                     cx, cy = board_center
-                    ok_rect = pygame.Rect(cx - 55, cy + 40, 110, 44)
-                    if ok_rect.collidepoint(mouse_pos):
+                    ok_rect = draw_bankrupt_notice(screen, game, value_font, text_font, cx, cy)
+                    if ok_rect and ok_rect.collidepoint(mouse_pos):
+                        # Just dismiss. Do NOT advance here—flags were handled on click.
                         game.pending_bankrupt_notice = None
-                        rolled = None
-                        is_doubles = False
-                        has_rolled = False
                     continue
 
                 if selected_space is not None:
@@ -421,16 +457,7 @@ def running_display(num_players: int):
                 # End Turn button click
                 if end_rect and end_rect.collidepoint(mouse_pos):
                     if can_end_turn():
-                        player_idx = (player_idx + 1) % len(game.players)
-                        rolled = None
-                        is_doubles = False
-                        has_rolled = False
-
-                        # Immediately show the jail choices 
-                        next_player = game.players[player_idx]
-                        if next_player.in_jail and not game.pending_jail_turn:
-                            game.start_jail_turn(next_player)
-
+                        advance_to_next()
                     continue
 
                 if not dice.is_inside_circle(mouse_pos, circ_center, circ_rad):
@@ -463,21 +490,21 @@ def running_display(num_players: int):
                         rolled = None
                         is_doubles = False
                         has_rolled = False
-                        player_idx = (player_idx + 1) % len(game.players)
-                
+                        advance_to_next()                
                 else:
                     player.doubles_rolled_consecutive = 0
 
         # Give Player 1 all properties
-        # game.players[0].properties_owned = [game.board.spaces[i] for i in [1, 3, 5, 6, 8, 9, 11, 12, 13, 14, 15, 16, 18, 19, 21, 23, 24, 25, 26, 27, 28, 29, 31, 32, 34, 35, 37, 39]]
-        # for prop in game.players[0].properties_owned:
-        #     prop.owner = game.players[0]
-        #     prop.num_houses = 4
+        game.players[0].properties_owned = [game.board.spaces[i] for i in [1, 3, 5, 6, 8, 9, 11, 12, 13, 14, 15, 16, 18, 19, 21, 23, 24, 25, 26, 27, 28, 29, 31, 32, 34, 35, 37, 39]]
+        for prop in game.players[0].properties_owned:
+            prop.owner = game.players[0]
+            prop.num_houses = 4
 
         # Draw the Board
         space_rects = board_game(screen, text_font, board_size, corner_size, space_size)
         draw_mortgage_badges(screen, game, space_rects)
 
+        game.current_player_index = player_idx
         current_player = game.players[player_idx]
 
         enable_dice = ((not has_rolled or is_doubles) and not current_player.in_jail)
@@ -514,7 +541,12 @@ def running_display(num_players: int):
                 screen.blit(jail_text, (circ_center[0] - jail_text.get_width()//2, circ_center[1] - 250))    # 150
          
         # If there is a pending display, draw one of them 
-        if game.pending_purchase:
+
+        if game.game_over:
+            cx, cy = board_center
+            draw_winner_modal(screen, game, value_font, value_font, cx, cy)
+
+        elif game.pending_purchase:
             draw_purchase_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
         elif game.pending_rent: 
