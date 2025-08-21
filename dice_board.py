@@ -41,9 +41,99 @@ player_colors = [(0,0,255), (0,255,0), (255,0,0), (0, 255, 255)]
 
 board_center = (board_size//2, board_size//2)
 
-def running_display(num_players: int):
-    
-    game = Game(player_names=[f"Player {i+1}" for i in range(num_players)])
+def running_display(player_names: list[str]):
+    game = Game(player_names=player_names)
+
+    # --- Centered roll-off with per-player delay, full order display, and tie re-roll for first place ---
+    def roll_for_first(game, screen, board_center, value_font):
+        import pygame
+        players_in_order = list(game.players)   # preserve initial order for stable tie-breaking
+        roll_sum = {p: None for p in players_in_order}
+
+        def draw_round(rows, subtitle=None):
+            # rows: list of (name, sum) already rolled this sequence
+            screen.fill((255, 255, 255))
+            header = value_font.render("Rolling for turn order…", True, (0, 0, 0))
+            screen.blit(header, (screen_width//2 - header.get_width() // 2,
+                                 screen_height//2 - 120))
+            y = -60
+            for name, s in rows:
+                line = value_font.render(f"{name} rolled {s}", True, (0, 0, 0))
+                screen.blit(line, (screen_width//2 - line.get_width() // 2,
+                                   screen_height//2 + y))
+                y += 36
+            if subtitle:
+                sub = value_font.render(subtitle, True, (160, 0, 0))
+                screen.blit(sub, (screen_width//2 - sub.get_width() // 2,
+                                  screen_height//2 + 100))
+            pygame.display.flip()
+
+        # First round: everyone rolls, show each roll centered with a pause
+        round_rows = []
+        for p in players_in_order:
+            s, _ = game.dice.roll()
+            roll_sum[p] = s
+            round_rows.append((p.name, s))
+            draw_round(round_rows)
+            pygame.time.delay(1000)  # delay between each player's roll
+
+        # Break ties for FIRST place only (keep re-rolling tied-top until unique)
+        def break_top_tie():
+            nonlocal roll_sum
+            while True:
+                top = max(roll_sum.values())
+                tied = [p for p, s in roll_sum.items() if s == top]
+                if len(tied) <= 1:
+                    return
+                # re-roll only the players tied for top; show mini sequence
+                mini_rows = []
+                draw_round(round_rows, "Tie! Re-rolling tied players…")
+                pygame.time.delay(900)
+                for p in tied:
+                    s, _ = game.dice.roll()
+                    roll_sum[p] = s
+                    mini_rows.append((p.name, s))
+                    # show the re-rolls right in the center (fresh view)
+                    screen.fill((255, 255, 255))
+                    header = value_font.render("Tie-break rolls…", True, (0, 0, 0))
+                    screen.blit(header, (screen_width//2 - header.get_width() // 2,
+                                         screen_height//2 - 120))
+                    y = -60
+                    for name, s2 in mini_rows:
+                        line = value_font.render(f"{name} rolled {s2}", True, (0, 0, 0))
+                        screen.blit(line, (screen_width//2 - line.get_width() // 2,
+                                           screen_height//2 + y))
+                        y += 36
+                    pygame.display.flip()
+                    pygame.time.delay(900)
+
+        break_top_tie()
+
+        # Build final turn order: sort by roll_sum desc, stable for non-top ties
+        ordered_players = sorted(players_in_order, key=lambda p: roll_sum[p], reverse=True)
+        ordered_rows = [(p.name, roll_sum[p]) for p in ordered_players]
+
+        # Show final order centered
+        screen.fill((255, 255, 255))
+        title = value_font.render("Turn order", True, (0, 0, 0))
+        screen.blit(title, (screen_width//2 - title.get_width() // 2,
+                            screen_height//2 - 140))
+        y = -80
+        for i, (name, r) in enumerate(ordered_rows, start=1):
+            line = value_font.render(f"{i}. {name} ({r})", True, (0, 0, 0))
+            screen.blit(line, (screen_width//2 - line.get_width() // 2,
+                               screen_height//2 + y))
+            y += 36
+        pygame.display.flip()
+        pygame.time.delay(1800)
+
+        return ordered_players
+
+    # Run the centered, delayed roll-off and apply the order
+    ordered_players = roll_for_first(game, screen, board_center, value_font)
+    game.players = ordered_players
+
+    # Assign player colors in the new order so UI reflects turn order
     for i, player in enumerate(game.players):
         player.color = player_colors[i % len(player_colors)]
 
@@ -475,9 +565,6 @@ def running_display(num_players: int):
                     roll_total, is_doubles = game.dice.roll()
                     has_rolled = True
                     rolled = (game.dice.die1_value, game.dice.die2_value)
-                    # rolled = (5,5)
-                    # is_doubles = True
-                    # roll_total = 30
                     player.move(roll_total, game.board)
 
                 # What the do if there are doubles 
@@ -494,11 +581,11 @@ def running_display(num_players: int):
                 else:
                     player.doubles_rolled_consecutive = 0
 
-        # Give Player 1 all properties
-        game.players[0].properties_owned = [game.board.spaces[i] for i in [1, 3, 5, 6, 8, 9, 11, 12, 13, 14, 15, 16, 18, 19, 21, 23, 24, 25, 26, 27, 28, 29, 31, 32, 34, 35, 37, 39]]
-        for prop in game.players[0].properties_owned:
-            prop.owner = game.players[0]
-            prop.num_houses = 4
+        # ----Dev Testing------
+        # game.players[0].properties_owned = [game.board.spaces[i] for i in [1, 3, 5, 6, 8, 9, 11, 12, 13, 14, 15, 16, 18, 19, 21, 23, 24, 25, 26, 27, 28, 29, 31, 32, 34, 35, 37, 39]]
+        # for prop in game.players[0].properties_owned:
+        #     prop.owner = game.players[0]
+        #     prop.num_houses = 4
 
         # Draw the Board
         space_rects = board_game(screen, text_font, board_size, corner_size, space_size)
@@ -603,6 +690,10 @@ def running_display(num_players: int):
     sys.exit()
 
 if __name__ == "__main__":
-    #num_players = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
-    num_players = 4
-    running_display(num_players)
+    names_or_count = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
+    if isinstance(names_or_count, list):
+        player_names = names_or_count
+    else:
+        # fallback: old flow where only number was returned
+        player_names = [f"Player {i+1}" for i in range(int(names_or_count))]
+    running_display(player_names)

@@ -4,7 +4,7 @@ class Player:
     def __init__(self, name: str, color=(0,0,0)):
         self.name = name
         self.color = color
-        self.money = 15
+        self.money = 1500
         self.position = 0
         self.properties_owned = []
         self.in_jail = False
