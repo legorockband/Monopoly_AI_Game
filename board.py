@@ -1,7 +1,7 @@
 #board.py
 # reference link : https://www.pygame.org/docs/
 import pygame
-from game_test import Property, Railroad, Utility
+from game import Property, Railroad, Utility
 
 def _trade_sort_key(s):
     # Properties first (grouped by board order), then Railroads, then Utilities

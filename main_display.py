@@ -4,10 +4,10 @@ import os
 import ctypes
 
 import dice
-from board_test import *
+from board import *
 import title_screen
 import player_cards
-from game_test import Game
+from game import Game
 
 pygame.init()
 screen = pygame.display.set_mode((0, 0), pygame.RESIZABLE)

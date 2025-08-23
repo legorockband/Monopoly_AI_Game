@@ -1,5 +1,5 @@
 import pygame
-from game_test import Player, Property, Railroad, Utility
+from game import Player, Property, Railroad, Utility
 
 COLOR_ORDER = [
     (150, 75, 0),    # Brown
