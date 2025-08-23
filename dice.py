@@ -7,11 +7,11 @@ import random
 
 pygame.init()
 
-## Set pygame screen
-screen_width = 800
-screen_height = 800
-screen = pygame.display.set_mode((screen_width, screen_height))
-pygame.display.set_caption("Dice Roller")
+# ## Set pygame screen
+# screen_width = 800
+# screen_height = 800
+# screen = pygame.display.set_mode((screen_width, screen_height))
+# pygame.display.set_caption("Dice Roller")
 
 ## Font 
 font = pygame.font.SysFont('Courier New', 30)
@@ -96,10 +96,10 @@ def draw_dice(screen, dice_values, x, y):
             text_surface = font.render(row, True, (0, 0, 0))
             screen.blit(text_surface, (x + i * 200, y + row_index * 30))  # Offset for 2nd die
 
-def draw_total(screen, dice_values):
+def draw_total(screen, dice_values, x, y, value_font):
     total = sum(dice_values)
     total_surface = value_font.render(f"Total: {total}", True, (0, 0, 0))
-    screen.blit(total_surface, (screen_width//2 - total_surface.get_width()//2, 100))
+    screen.blit(total_surface, (x - total_surface.get_width()//2, y))
 
 ## Button Properties 
 but_x = 300
@@ -110,54 +110,12 @@ but_color = (255, 0, 0)
 
 but_rect = pygame.Rect(but_x, but_y, but_width, but_height)
 
-circ_center = (400, 650)
-circ_rad = 50
-circ_color = (255, 0, 0)
-
 def is_inside_circle(pos, center, radius):
     return (pos[0] - center[0])**2 + (pos[1] - center[1])**2 <= radius**2
 
-running = True
-rolled = None
-
-doubles_rolled = []
-is_double = False
-
-while running:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-        
-        elif event.type == pygame.MOUSEBUTTONDOWN:
-            mouse_pos = event.pos
-
-            ## If the mouse clicks on the button roll the dice
-            if is_inside_circle(event.pos, circ_center, circ_rad):
-                rolled = dice_roll()
-                is_doubles = dice_logic(rolled, doubles_rolled)
-
-    ## Fill the background with white
-    screen.fill((255, 255, 255))
-
-    ## Make a button 
-    pygame.draw.circle(screen, circ_color, circ_center, circ_rad)
+def make_dice_button(screen, circ_color, circ_center, circ_rad, enable=True):
+    color = circ_color if enable else (160, 160, 160)
+    pygame.draw.circle(screen, color, circ_center, circ_rad)
     button_text = value_font.render("ROLL", True, (255, 255, 255))
     text_rect = button_text.get_rect(center=circ_center)
     screen.blit(button_text, text_rect)
-
-    ## Display dice roll and total 
-    if rolled:
-        draw_dice(screen, rolled, 200, 200)
-        draw_total(screen, rolled)
-
-        if is_doubles:
-            doubles_text = value_font.render("You rolled doubles!", True, (0, 0, 0))
-            screen.blit(doubles_text, (screen_width//2 - doubles_text.get_width()//2, 50))
-
-        if len(doubles_rolled) >= 3:
-            jail_text = value_font.render("Too Many Doubles Rolled, Go To Jail", True, (255, 0, 0))
-            screen.blit(jail_text, (screen_width//2 - jail_text.get_width()//2, 150))
-    
-    pygame.display.flip()
-
-pygame.quit()
