@@ -10,6 +10,7 @@ import title_screen
 import player_cards
 from game import Game
 from ai_mcts import MCTSMonopolyBot
+from ai_manage import AIMonopolyPropertyManager
 
 pygame.init()
 screen = pygame.display.set_mode((0, 0), pygame.RESIZABLE)
@@ -48,6 +49,7 @@ DEFAULT_POPUP_DELAY_MS = int(os.getenv("POPUP_DELAY_MS", "800"))  # set to "0" f
 
 def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     game = Game(player_names=player_names)
+    ai_prop_mgr = AIMonopolyPropertyManager()
 
     # Resolve the actual delay (env-backed default; per-call override allowed)
     AUTO_DELAY_MS = DEFAULT_POPUP_DELAY_MS if popup_delay_ms is None else max(0, int(popup_delay_ms))
@@ -160,6 +162,8 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     ai_card_started_at = None         
     ai_purchase_started_at = None
     ai_trade_started_at = None
+    ai_build_intent_prop = None   
+    ai_build_started_at = None 
 
     # --- Human timers  ---
     human_card_started_at = None
@@ -205,6 +209,9 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
         nonlocal ai_jail_notice_started_at, ai_jail_turn_started_at, ai_rent_started_at, ai_tax_started_at, ai_bankrupt_started_at, ai_card_started_at, ai_purchase_started_at
         nonlocal human_card_started_at, human_purchase_started_at, human_rent_started_at, human_tax_started_at
         nonlocal human_jail_notice_started_at, human_jail_turn_started_at, human_bankrupt_started_at
+        nonlocal human_trade_started_at 
+        nonlocal ai_build_intent_prop, ai_build_started_at
+        nonlocal ai_trade_started_at  
 
         if len(game.players) == 0:
             return
@@ -216,6 +223,10 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
         ai_purchase_started_at = None
         ai_jail_notice_started_at = ai_jail_turn_started_at = None
         ai_rent_started_at = ai_tax_started_at = ai_bankrupt_started_at = None
+        ai_trade_started_at = None
+        # reset AI build intent/timer
+        ai_build_intent_prop = None
+        ai_build_started_at = None
         
         human_card_started_at = human_purchase_started_at = None
         human_rent_started_at = human_tax_started_at = None
@@ -437,9 +448,10 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                 info = game.pending_purchase
                 if info and info.get("player") is cur:
                     affordable = info.get("affordable", True)
-                    prop = info.get("property")
-                    # Conservative default: buy if affordable and leaves ~$100 buffer.
-                    want_buy = bool(affordable and (cur.money - getattr(prop, "cost", 0) >= 100))
+                    space = info.get("property")
+                    cost = getattr(space, "cost", 0)
+                    buffer_needed = ai_prop_mgr._cash_buffer_needed(game, cur)
+                    want_buy = bool(affordable and (cur.money - cost >= buffer_needed))
                     game.confirm_purchase(want_buy)
                 ai_purchase_started_at = None
 
@@ -447,6 +459,22 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
             if game.pending_bankrupt_notice and ai_bankrupt_started_at is not None and elapsed(ai_bankrupt_started_at):
                 game.pending_bankrupt_notice = None
                 ai_bankrupt_started_at = None
+
+            # 7) Auto-confirm Build/Manage "Buy House" when the AI opened it
+            if (game.pending_build 
+                and ai_build_intent_prop is not None 
+                and game.pending_build.get("player") is cur 
+                and game.pending_build.get("property") is ai_build_intent_prop):
+                if ai_build_started_at is None:
+                    ai_build_started_at = pygame.time.get_ticks()
+                elif elapsed(ai_build_started_at):
+                    if game.pending_build.get("can_house"):
+                        game.confirm_build("house")
+                    else:
+                        game.confirm_build("skip")  # state may have changed
+                    ai_build_intent_prop = None
+                    ai_build_started_at = None
+
 
         # --- Click Handling ---
         for event in pygame.event.get():
@@ -951,6 +979,43 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     rolled = (game.dice.die1_value, game.dice.die2_value)
                     current_player.move(roll_total, game.board)
 
+            modals_open = (
+                game.last_drawn_card or game.pending_purchase or game.pending_rent or
+                game.pending_tax or game.pending_build or game.pending_debt or
+                game.pending_jail or game.pending_jail_turn or game.pending_bankrupt_notice
+            )
+            if not modals_open and has_rolled:
+                ai_prop_mgr.consider_management(game, current_player)
+
+            modals_open = (
+                game.last_drawn_card or game.pending_purchase or game.pending_rent or
+                game.pending_tax or game.pending_build or game.pending_debt or
+                game.pending_jail or game.pending_jail_turn or game.pending_bankrupt_notice
+            )
+            if not modals_open and has_rolled and ai_build_intent_prop is None:
+                req_prop = ai_prop_mgr.next_build_request(game, current_player)
+                if req_prop:
+                    can_house, _      = req_prop.can_build_house(current_player, game.board)
+                    can_hotel, _      = req_prop.can_build_hotel(current_player, game.board)
+                    can_sell_house, _ = req_prop.can_sell_house(current_player, game.board)
+                    can_sell_hotel, _ = req_prop.can_sell_hotel(current_player, game.board)
+                    can_mortgage, _   = req_prop.can_mortgage(current_player, game.board)
+                    can_unmortgage, _ = req_prop.can_unmortgage(current_player)
+
+                    game.pending_build = {
+                        "player": current_player,
+                        "property": req_prop,
+                        "can_house": can_house,
+                        "can_hotel": can_hotel,
+                        "can_sell_house": can_sell_house,
+                        "can_sell_hotel": can_sell_hotel,
+                        "can_mortgage": can_mortgage,
+                        "can_unmortgage": can_unmortgage,
+                        "cost": req_prop.house_cost,
+                    }
+                    ai_build_intent_prop = req_prop
+                    ai_build_started_at = pygame.time.get_ticks()
+
             # End turn automatically if allowed
             if (has_rolled and (not is_doubles) and not (game.pending_build or game.pending_rent or game.pending_purchase or game.last_drawn_card or game.pending_debt or game.pending_jail_turn or game.pending_bankrupt_notice)):
                 advance_to_next()
@@ -1030,8 +1095,9 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                 if ai_purchase_started_at is None:
                     ai_purchase_started_at = pygame.time.get_ticks()
                 elif elapsed(ai_purchase_started_at):
-                    # Heuristic: buy if affordable AND keep a small buffer
-                    want_buy = bool(affordable and (p.money - getattr(prop, "cost", 0) >= 100))
+                    cost = getattr(prop, "cost", 0)
+                    buffer_needed = ai_prop_mgr._cash_buffer_needed(game, p)
+                    want_buy = bool(affordable and (p.money - cost >= buffer_needed))
                     game.confirm_purchase(want_buy)
                     ai_purchase_started_at = None
             else:
@@ -1170,6 +1236,10 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
             # Ensure stale rects are cleared when the editor closes
             trade_editor_rects = None
 
+        if not game.pending_build and ai_build_intent_prop is not None:
+            ai_build_intent_prop = None
+            ai_build_started_at = None
+
         pygame.display.flip()
         clock.tick(60)
 
@@ -1177,12 +1247,13 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     sys.exit()
 
 if __name__ == "__main__":
-    names_or_count = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
-    if isinstance(names_or_count, list):
-        player_names = names_or_count
-    else:
+    #names_or_count = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
+    #if isinstance(names_or_count, list):
+       #player_names = names_or_count
+    #else:
         # fallback: old flow where only number was returned
-        player_names = [f"Player {i+1}" for i in range(int(names_or_count))]
+        #player_names = [f"Player {i+1}" for i in range(int(names_or_count))]
     
-    # player_names = ["AI 1", "AI 2"]
+    player_names = ["AI 1", "AI 2", "AI 3", "AI 4"]
+    #player_names = ["AI 1", "AI 2"]
     running_display(player_names, popup_delay_ms=0)
