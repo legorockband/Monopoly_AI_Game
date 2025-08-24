@@ -85,11 +85,13 @@ class Card:
         print(f"Card Drawn ({self.card_type}): {self.description}")
         if self.action_type == "collect_money":
             player.collect_money(self.value)
+        
         elif self.action_type == "pay_money":
             if player.money >= self.value:
                 player.pay_money(self.value)
             else:
                 game.start_debt(player, self.value, creditor=None, reason=f"Card: {self.description}")
+        
         elif self.action_type == "move_to":
             
             if self.target_space_index == -3:
@@ -115,10 +117,8 @@ class Card:
             game.board.spaces[player.position].land_on(player, game.board)
 
         elif self.action_type == "go_to_jail":
-            player.in_jail = True
-            player.position = game.board.jail_space_index
-            player.jail_turns = 0
-            print(f"{player.name} sent to Jail!")
+            game.pending_jail = {"player": player}
+            print(f"{player.name} sent to Jail (via card)!")
 
         elif self.action_type == "get_out_of_jail":
             player.get_out_of_jail_free_cards += 1

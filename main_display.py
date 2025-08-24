@@ -233,13 +233,16 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     while running:
         # Check if any popups are going to happen
         def any_modal_open():
+            cur = game.players[player_idx] if game.players else None
+            jail_notice_blocks = bool(game.pending_jail and game.pending_jail.get("player") is cur)
+            jail_turn_blocks   = bool(game.pending_jail_turn and game.pending_jail_turn.get("player") is cur)
             return (
                 game.pending_purchase or game.pending_rent or game.pending_tax or
-                game.pending_build or game.pending_jail or game.pending_jail_turn or
+                game.pending_build or jail_notice_blocks or jail_turn_blocks or
                 game.pending_debt or trade_select_open or trade_edit_open or
                 manage_select_open
             )
-
+        
         cur = game.players[player_idx] if game.players else None
         if cur and is_ai_player(cur):
             # 1) If the "Go To Jail" modal is up, acknowledge it after delay (drawn below)
@@ -915,7 +918,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                         rolled = None
                         is_doubles = False
                         has_rolled = False
-                        advance_to_next()                
+                        # advance_to_next()                
                 
                 else:
                     player.doubles_rolled_consecutive = 0
@@ -937,7 +940,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
 
         bot = MCTSMonopolyBot(name_prefix="AI")
         if bot.is_ai(current_player):
-            # If any modal is open, let the UI handle it + delay; DO NOT step the bot now.
+            # If any f is open, let the UI handle it + delay; DO NOT step the bot now.
             modals_open = (
                 game.last_drawn_card or game.pending_purchase or game.pending_rent or
                 game.pending_tax or game.pending_build or game.pending_debt or
@@ -1090,8 +1093,63 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
             draw_jail_turn_choice_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
             if p and is_ai_player(p):
+                # Start timer (once)
                 if ai_jail_turn_started_at is None:
                     ai_jail_turn_started_at = pygame.time.get_ticks()
+                # After min read time, make the AI choice automatically
+                elif elapsed(ai_jail_turn_started_at):
+                    # --- Phase detection: early vs late game
+                    props = [s for s in game.board.spaces if getattr(s, "type", "") == "Property"]
+                    total_props = len(props) or 1
+                    owned_props = sum(1 for s in props if getattr(s, "owner", None) is not None)
+                    owned_ratio = owned_props / total_props
+                    EARLY = owned_ratio < 0.50
+                    LATE  = owned_ratio >= 0.75
+                    forced_third = (p.jail_turns >= 2)
+
+                    if EARLY:
+                        if p.get_out_of_jail_free_cards > 0:
+                            game.use_gojf_and_exit(p)
+                        elif p.money >= 50:
+                            game.pay_fine_and_exit(p)
+                        else:
+                            game.roll_for_doubles_from_jail(p)
+                            rolled = (game.dice.die1_value, game.dice.die2_value)
+                            is_doubles = (rolled[0] == rolled[1])
+                            has_rolled = True
+                            if p.in_jail:
+                                advance_to_next()
+                                ai_jail_turn_started_at = None
+                                # Skip the rest of this frame after advancing
+                                pass
+                    else:
+                        if forced_third:
+                            if p.get_out_of_jail_free_cards > 0:
+                                game.use_gojf_and_exit(p)
+                            elif p.money >= 50:
+                                game.pay_fine_and_exit(p)
+                            else:
+                                game.roll_for_doubles_from_jail(p)
+                                rolled = (game.dice.die1_value, game.dice.die2_value)
+                                is_doubles = (rolled[0] == rolled[1])
+                                has_rolled = True
+                                if p.in_jail:
+                                    advance_to_next()
+                                    ai_jail_turn_started_at = None
+                                    pass
+                        else:
+                            game.roll_for_doubles_from_jail(p)
+                            rolled = (game.dice.die1_value, game.dice.die2_value)
+                            is_doubles = (rolled[0] == rolled[1])
+                            has_rolled = True
+                            if p.in_jail:
+                                advance_to_next()
+                                ai_jail_turn_started_at = None
+                                pass
+
+                    # Clear timer after acting (if we didn't early-return above)
+                    ai_jail_turn_started_at = None
+
             else:
                 if human_jail_turn_started_at is None:
                     human_jail_turn_started_at = pygame.time.get_ticks()
@@ -1177,12 +1235,12 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     sys.exit()
 
 if __name__ == "__main__":
-    names_or_count = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
-    if isinstance(names_or_count, list):
-        player_names = names_or_count
-    else:
-        # fallback: old flow where only number was returned
-        player_names = [f"Player {i+1}" for i in range(int(names_or_count))]
+    # names_or_count = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
+    # if isinstance(names_or_count, list):
+    #     player_names = names_or_count
+    # else:
+    #     # fallback: old flow where only number was returned
+    #     player_names = [f"Player {i+1}" for i in range(int(names_or_count))]
     
-    # player_names = ["AI 1", "AI 2"]
-    running_display(player_names, popup_delay_ms=0)
+    player_names = ["AI 1", "AI 2", "AI 3", "AI 4"]
+    running_display(player_names, popup_delay_ms=5)

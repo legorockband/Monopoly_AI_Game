@@ -415,6 +415,10 @@ class MCTSMonopolyBot:
             return {"want_roll": False, "want_end": False}
 
         # No modal: we can think about rolling/end-of-turn.
+        # Try a smart trade first.
+        if self._try_trade(game, player):
+            return {"want_roll": False, "want_end": False}
+
         model = ActionModel(game, player)
         actions = model.legal_actions()
         if actions and (len(actions) > 1 or actions[0].kind != "NOOP"):
@@ -423,7 +427,104 @@ class MCTSMonopolyBot:
             return {"want_roll": False, "want_end": False}
 
         return {"want_roll": True, "want_end": False}
+    
+    # --- Trading heuristics ---
+    def _priority_colors(self):
+        # Orange first; then strong middle (pink/red/yellow), then light blue
+        return [
+            (255, 165, 0),  # Orange
+            (255, 0, 0),    # Red
+            (255, 255, 0),  # Yellow
+            (255, 0, 255),  # Pink
+            (173, 216, 230) # Light Blue
+        ]
+    
+    def _owns_any_in_band(self, game, me):
+        # High-value band: indices 11..29 inclusive, exclude utilities
+        for sp in game.board.spaces[11:30]:
+            if getattr(sp, "type", "") == "Property" and getattr(sp, "owner", None) is me:
+                return True
+        # also count any Orange anywhere
+        for sp in me.properties_owned:
+            if getattr(sp, "type", "") == "Property" and getattr(sp, "color_group", None) == (255, 165, 0):
+                return True
+        return False
 
+    def _missing_set_props(self, game, me, color):
+        mine = [sp for sp in me.properties_owned
+                if getattr(sp, "type","")=="Property" and getattr(sp, "color_group", None)==color]
+        group = [sp for sp in game.board.spaces
+                 if getattr(sp, "type","")=="Property" and getattr(sp, "color_group", None)==color]
+        missing = [sp for sp in group if getattr(sp, "owner", None) is not me]
+        return mine, group, missing
+
+    def _find_owner(self, sp, players):
+        for p in players:
+            if getattr(sp, "owner", None) is p:
+                return p
+        return None
+
+    def _cash_after(self, me, cash_offer):
+        return getattr(me,"money",0) - int(cash_offer)
+
+    def _try_trade(self, game, me):
+        # Only consider if no proposal pending and we have some cash buffer
+        if getattr(game, "pending_trade", None):
+            return False
+        if not self._owns_any_in_band(game, me):
+            return False
+
+        budget = max(0, getattr(me, "money", 0) - MIN_CASH_BUFFER)
+        if budget < 60:  # nothing meaningful to offer
+            return False
+
+        # Walk priority colors; try to buy a single missing title from its owner
+        for color in self._priority_colors():
+            mine, group, missing = self._missing_set_props(game, me, color)
+            if not mine or not missing:
+                continue
+
+            # Try the cheapest missing first
+            missing_sorted = sorted(missing, key=lambda s: getattr(s, "cost", 0))
+
+            for target in missing_sorted:
+                owner = self._find_owner(target, game.players)
+                if owner is None or owner is me:
+                    continue
+
+                base = int(getattr(target, "cost", 0) or 0)
+                completes = (len(mine) + 1 == len(group))
+                premium = int(round(base * (0.30 if completes else 0.10)))  # +30% if completing, else +10%
+                offer_cash = min(budget, base + premium)
+
+                if self._cash_after(me, offer_cash) < MIN_CASH_BUFFER:
+                    continue
+
+                offer_left  = {"cash": offer_cash, "gojf": 0, "props": []}
+                offer_right = {"cash": 0,        "gojf": 0, "props": [target]}
+
+                # Rough fairness check using the engine's heuristic
+                delta_ok = True
+                try:
+                    prev = getattr(game, "pending_trade", None)
+                    game.start_trade_proposal(me, owner, offer_left, offer_right)
+                    dl_me  = game.rough_trade_delta_for(me)
+                    dl_own = game.rough_trade_delta_for(owner)
+                    fair = abs(dl_me) <= base * 0.20 and abs(dl_own) <= base * 0.20
+                    if completes:
+                        fair = dl_own >= 0  # ensure the other side isn't losing value
+                    delta_ok = fair
+                finally:
+                    game.pending_trade = prev  # restore
+
+                if not delta_ok:
+                    continue
+
+                # Propose it!
+                game.start_trade_proposal(me, owner, offer_left, offer_right)
+                return True
+
+        return False
 
 # --- Integration instructions ----------------------------------------------
 INTEGRATION = r"""
