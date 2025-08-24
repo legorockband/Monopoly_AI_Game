@@ -2,7 +2,6 @@ import pygame
 import sys
 import os
 import ctypes
-import time
 
 import dice
 from board import *
@@ -18,7 +17,7 @@ screen = pygame.display.set_mode((0, 0), pygame.RESIZABLE)
 if os.name == 'nt':
     hwnd = pygame.display.get_wm_info()['window']
     ctypes.windll.user32.ShowWindow(hwnd, 3)  # 3 = SW_MAXIMIZE
-    
+
 clock = pygame.time.Clock()
 pygame.display.set_caption("Monopoly")
 value_font = pygame.font.SysFont('Arial', 30)
@@ -46,8 +45,35 @@ board_center = (board_size//2, board_size//2)
 # --- Global popup delay (ms). You can override at runtime via env or by passing a param to running_display ---
 DEFAULT_POPUP_DELAY_MS = int(os.getenv("POPUP_DELAY_MS", "800"))  # set to "0" for instant
 
+
+# Local helper for rough property value (used in trade AI inside this file)
+def _weighted_title_value(sp):
+    t = getattr(sp, "type", "")
+    if t == "Railroad":
+        return getattr(sp, "cost", 0) * 1.05
+    if t == "Utility":
+        return getattr(sp, "cost", 0) * 0.35
+    if t == "Property":
+        COLOR_WEIGHTS = {
+            (255, 165, 0): 1.30,  # Orange
+            (255, 0, 0): 1.20,    # Red
+            (173, 216, 230): 1.12,# Light Blue
+            (255, 255, 0): 1.00,  # Yellow
+            (0, 255, 0): 0.95,    # Green
+            (255, 0, 255): 0.90,  # Pink
+            (150, 75, 0): 0.85,   # Brown
+            (0, 0, 139): 0.75,    # Dark Blue
+        }
+        w = COLOR_WEIGHTS.get(getattr(sp, "color_group", None), 0.8)
+        return getattr(sp, "cost", 0) * w
+    return getattr(sp, "cost", 0) or 0
+
+
 def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     game = Game(player_names=player_names)
+    bot = MCTSMonopolyBot(name_prefix="AI")  # instantiate once
+
+    game._trade_attempted_this_turn = set()
 
     # Resolve the actual delay (env-backed default; per-call override allowed)
     AUTO_DELAY_MS = DEFAULT_POPUP_DELAY_MS if popup_delay_ms is None else max(0, int(popup_delay_ms))
@@ -157,7 +183,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     ai_rent_started_at = None
     ai_tax_started_at = None
     ai_bankrupt_started_at = None
-    ai_card_started_at = None         
+    ai_card_started_at = None
     ai_purchase_started_at = None
     ai_trade_started_at = None
 
@@ -177,8 +203,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     def ready(start):
         # Clicks are allowed immediately if delay==0, else after min read time
         return (AUTO_DELAY_MS == 0) or elapsed(start)
-    
-    doubles_rolled = []
+
     is_doubles = False
     has_rolled = False
 
@@ -216,7 +241,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
         ai_purchase_started_at = None
         ai_jail_notice_started_at = ai_jail_turn_started_at = None
         ai_rent_started_at = ai_tax_started_at = ai_bankrupt_started_at = None
-        
+
         human_card_started_at = human_purchase_started_at = None
         human_rent_started_at = human_tax_started_at = None
         human_jail_notice_started_at = human_jail_turn_started_at = None
@@ -226,6 +251,10 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
         nxt = game.players[player_idx]
         if nxt.in_jail and not game.pending_jail_turn:
             game.start_jail_turn(nxt)
+
+        # Allow trades again next turn
+        if hasattr(game, "_trade_attempted_this_turn"):
+            game._trade_attempted_this_turn.clear()
 
     def is_ai_player(p):
         return isinstance(getattr(p, "name", None), str) and p.name.strip().lower().startswith("ai")
@@ -242,7 +271,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                 game.pending_debt or trade_select_open or trade_edit_open or
                 manage_select_open
             )
-        
+
         cur = game.players[player_idx] if game.players else None
         if cur and is_ai_player(cur):
             # 1) If the "Go To Jail" modal is up, acknowledge it after delay (drawn below)
@@ -263,7 +292,6 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     owned_props = sum(1 for s in props if getattr(s, "owner", None) is not None)
                     owned_ratio = owned_props / total_props
                     EARLY = owned_ratio < 0.50
-                    LATE  = owned_ratio >= 0.75
                     forced_third = (cur.jail_turns >= 2)
 
                     if EARLY:
@@ -310,14 +338,6 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
 
         # === Stamp timers at the start of the frame so both humans and AIs see consistent delays ===
         now = pygame.time.get_ticks()
-
-        def start_once(var_name):
-            # tiny helper to set a timer variable if it hasn't been set yet
-            nonlocal ai_jail_notice_started_at, ai_jail_turn_started_at, ai_rent_started_at, ai_tax_started_at, ai_bankrupt_started_at
-            nonlocal human_card_started_at, human_purchase_started_at, human_rent_started_at, human_tax_started_at
-            nonlocal human_jail_notice_started_at, human_jail_turn_started_at, human_bankrupt_started_at
-            if globals().get(var_name) is None:  # not strictly necessary, but safe if moved
-                pass  # placeholder to show intent
 
         # Cards (Chance / Community Chest)
         if game.last_drawn_card:
@@ -463,7 +483,6 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     cx, cy = board_center
                     ok_rect = draw_winner_modal(screen, game, value_font, value_font, cx, cy)
                     if ok_rect and ok_rect.collidepoint(mouse_pos):
-                        # Close the app (or you could jump back to a title screen if you have one)
                         running = False
                     continue
 
@@ -477,8 +496,6 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                         pending_card = game.pending_card
                         game.last_drawn_card = None
                         game.pending_card = None
-                        popup_timer = 0  # ensure cleared
-
                         if pending_card:
                             card = pending_card["card"]
                             player_card = pending_card["player"]
@@ -533,7 +550,6 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                             game.confirm_build("unmortgage")
                         elif rects["skip"].collidepoint(mouse_pos):
                             game.confirm_build("skip")
-                    # block other clicks while this modal is open
                     continue
 
                 # If a purchase is pending, only handle BUY / SKIP clicks
@@ -549,12 +565,12 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                         if affordable:   # ignore clicks if not affordable (greyed out)
                             game.confirm_purchase(True)
                             if is_human: human_purchase_started_at = None
-                    
+
                     elif skip_rect.collidepoint(mouse_pos):
                         game.confirm_purchase(False)
                         if is_human: human_purchase_started_at = None
                     continue
-                
+
                 # Jail popup
                 if game.pending_jail:
                     cx, cy = board_center
@@ -579,19 +595,19 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     p = game.pending_jail_turn["player"]
                     if p and not is_ai_player(p) and not ready(human_jail_turn_started_at):
                         continue
-                    
+
                     if r_use and r_use.collidepoint(mouse_pos):
                         game.use_gojf_and_exit(p)
                         human_jail_turn_started_at = None
                         rolled = None; is_doubles = False; has_rolled = False
                         continue
-                    
+
                     if r_pay and r_pay.collidepoint(mouse_pos):
                         game.pay_fine_and_exit(p)
                         human_jail_turn_started_at = None
                         rolled = None; is_doubles = False; has_rolled = False
                         continue
-                    
+
                     if r_roll and r_roll.collidepoint(mouse_pos):
                         game.roll_for_doubles_from_jail(p)
                         human_jail_turn_started_at = None
@@ -622,14 +638,14 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                             p.pay_money(amt)
                             if cred: cred.collect_money(amt)
                             game.clear_debt()
-                    
+
                     elif bk_r and bk_r.collidepoint(mouse_pos):
                         info = game.pending_debt
                         debtor = info["player"]; cred = info["creditor"]
-                        
+
                         # Was the debtor the current player *before* we modify the list?
                         was_current = (0 <= player_idx < len(game.players) and game.players[player_idx] is debtor)
-                        
+
                         game.declare_bankruptcy(debtor, cred)
                         game.clear_debt()
 
@@ -648,9 +664,9 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                         # keep UI sane if the current player just disappeared
                         if player_idx >= len(game.players):
                             player_idx = 0
-                        
+
                         manage_select_open = trade_select_open = trade_edit_open = False
-                        
+
                         # block all other clicks
                         continue
 
@@ -666,7 +682,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     continue
 
                 # --- TRADE REVIEW modal blocks everything else ---
-                if game.pending_trade:
+                if game.pending_trade and not trade_edit_open:
                     responder = game.pending_trade.get("responder")
                     cx, cy = board_center
                     acc_r, rej_r, ctr_r = draw_trade_review_modal(
@@ -685,7 +701,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                         ok, msg = game.reject_trade()
                         print(msg)
                         human_trade_started_at = None
-                    
+
                     elif ctr_r.collidepoint(mouse_pos):
                         # Open the editor prefilled for COUNTER by the responder.
                         # We make responder the left side in the editor for clarity.
@@ -697,6 +713,9 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                         iR = game.players.index(other)
                         trade_pair = (iL, iR)
                         trade_edit_open = True
+                        trade_editor_rects = draw_trade_editor_modal(
+                            screen, game.players[iL], game.players[iR], trade_offer, board_center[0], board_center[1]
+                        )
 
                         # Prefill with current "what responder gives/gets" mirrored to editor sides
                         trade_offer = {"left":{"cash":0,"gojf":0,"props":set()},
@@ -721,9 +740,9 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                             trade_offer["right"]["gojf"] = t["offer_right"].get("gojf",0)
                             trade_offer["right"]["props"] = { id(sp) for sp in t["offer_right"].get("props",[]) }
 
-                        # Close the review modal visually (but keep game.pending_trade)
-                        # The editor's Confirm click will call game.counter_trade(...)
-                        game.pending_trade = None
+                        # Close the review modal visually (but keep negotiation going in editor).
+                        # The editor's Confirm click will call game.counter_trade(...) or start_trade_proposal(...)
+                        # game.pending_trade = None
                         human_trade_started_at = None
                     continue  # block others while trade modal is up
 
@@ -739,15 +758,18 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                             if getattr(sp, "type", "") in ("Property", "Railroad", "Utility"):
                                 selected_space = sp
                             break
+                    
                     if selected_space is not None:
                         continue  # don't treat as dice click
-           
+
                 # --- TRADE: editor modal blocks everything ---
                 if trade_edit_open and trade_pair is not None:
                     cx, cy = board_center
                     iL, iR = trade_pair
                     pL, pR = game.players[iL], game.players[iR]
                     rects = trade_editor_rects or {}
+                    if not rects:
+                        trade_editor_rects = draw_trade_editor_modal(screen, pL, pR, trade_offer, board_center[0], board_center[1])
 
                     def adjust(side, key, delta, max_val=None):
                         if key == "cash":
@@ -768,20 +790,20 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     elif rects["right_gojf_minus"].collidepoint(mouse_pos):adjust("right", "gojf", -1, pR.get_out_of_jail_free_cards)
                     elif rects["right_gojf_plus"].collidepoint(mouse_pos): adjust("right", "gojf", +1, pR.get_out_of_jail_free_cards)
 
-                    # Property checkboxes: look for any key starting with "box_"
+                    # Property checkboxes: look for any key starting with "box_" or "hit_"
                     else:
                         clicked_box = None
                         for key, r in rects.items():
                             if (key.startswith("hit_") or key.startswith("box_")) and r.collidepoint(mouse_pos):
                                 clicked_box = key; break
-                        
+
                         if clicked_box:
                             _, side, pid_str = clicked_box.split("_", 2)
                             pid = int(pid_str)
                             s = trade_offer[side]["props"]
                             if pid in s: s.remove(pid)
                             else: s.add(pid)
-                        
+
                         elif rects["confirm"].collidepoint(mouse_pos):
                             # Build concrete offers using id->object resolution
                             left_props  = [sp for sp in game.players[iL].properties_owned if id(sp) in trade_offer["left"]["props"]]
@@ -799,13 +821,17 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                                 game.start_trade_proposal(game.players[iL], game.players[iR], offerL, offerR)
                                 print(f"{game.players[iL].name} proposed a trade to {game.players[iR].name}.")
 
+                            # After creating/countering a proposal, block further new trades this turn
+                            if hasattr(game, "_trade_attempted_this_turn"):
+                                game._trade_attempted_this_turn.update({ game.players[iL], game.players[iR] })
+
                             # Reset UI (close editor)
                             trade_editor_rects = None
                             trade_edit_open = False
                             trade_pair = None
                             trade_selected.clear()
                             trade_offer = {"left":{"cash":0,"gojf":0,"props":set()}, "right":{"cash":0,"gojf":0,"props":set()}}
-                        
+
                         elif rects["cancel"].collidepoint(mouse_pos):
                             trade_edit_open = False
                             trade_pair = None
@@ -831,6 +857,9 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                             iL, iR = sorted(list(trade_selected))
                             trade_pair = (iL, iR)
                             trade_edit_open = True
+                            trade_editor_rects = draw_trade_editor_modal(
+                                screen, game.players[iL], game.players[iR], trade_offer, board_center[0], board_center[1]
+                            )
                             trade_select_open = False
                         elif cancel_rect.collidepoint(mouse_pos):
                             trade_select_open = False
@@ -893,22 +922,22 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
 
                 if not dice.is_inside_circle(mouse_pos, circ_center, circ_rad):
                     continue
-               
+
                 player = game.players[player_idx]
-                
+
                 if player.in_jail:
                     if not game.pending_jail_turn:
                         game.start_jail_turn(player)
                     continue
-                
-                # If you have haven't rolled yet or you have doubles, you can yoll again
+
+                # If you haven't rolled yet or you have doubles, you can roll again
                 if (not has_rolled or is_doubles) and not player.in_jail:
                     roll_total, is_doubles = game.dice.roll()
                     has_rolled = True
                     rolled = (game.dice.die1_value, game.dice.die2_value)
                     player.move(roll_total, game.board)
 
-                # What the do if there are doubles 
+                # What to do if there are doubles
                 if is_doubles:
                     player.doubles_rolled_consecutive += 1
                     if player.doubles_rolled_consecutive == 3:
@@ -918,16 +947,8 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                         rolled = None
                         is_doubles = False
                         has_rolled = False
-                        # advance_to_next()                
-                
                 else:
                     player.doubles_rolled_consecutive = 0
-
-        # ----Dev Testing------
-        # game.players[0].properties_owned = [game.board.spaces[i] for i in [1, 3, 5, 6, 8, 9, 11, 12, 13, 14, 15, 16, 18, 19, 21, 23, 24, 25, 26, 27, 28, 29, 31, 32, 34, 35, 37, 39]]
-        # for prop in game.players[0].properties_owned:
-        #     prop.owner = game.players[0]
-        #     prop.num_houses = 4
 
         # Draw the Board
         space_rects = board_game(screen, text_font, board_size, corner_size, space_size)
@@ -938,13 +959,14 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
 
         enable_dice = ((not has_rolled or is_doubles) and not current_player.in_jail)
 
-        bot = MCTSMonopolyBot(name_prefix="AI")
+        # --- AI driver: let the bot act automatically (when it’s an AI’s turn) ---
         if bot.is_ai(current_player):
-            # If any f is open, let the UI handle it + delay; DO NOT step the bot now.
+            # If any modal is open, let UI handle it + delay; DO NOT step the bot now.
             modals_open = (
                 game.last_drawn_card or game.pending_purchase or game.pending_rent or
                 game.pending_tax or game.pending_build or game.pending_debt or
-                game.pending_jail or game.pending_jail_turn or game.pending_bankrupt_notice
+                game.pending_jail or game.pending_jail_turn or game.pending_bankrupt_notice or
+                game.pending_trade
             )
             if not modals_open:
                 intent = bot.step(game, current_player, iterations=300)
@@ -955,7 +977,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     current_player.move(roll_total, game.board)
 
             # End turn automatically if allowed
-            if (has_rolled and (not is_doubles) and not (game.pending_build or game.pending_rent or game.pending_purchase or game.last_drawn_card or game.pending_debt or game.pending_jail_turn or game.pending_bankrupt_notice)):
+            if (has_rolled and (not is_doubles) and not (game.pending_build or game.pending_rent or game.pending_purchase or game.last_drawn_card or game.pending_debt or game.pending_jail_turn or game.pending_bankrupt_notice or game.pending_trade)):
                 advance_to_next()
 
         enable_dice = ((not has_rolled or is_doubles) and not current_player.in_jail)
@@ -963,36 +985,32 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
         # Make interactable buttons
         dice.make_dice_button(screen, circ_color, circ_center, circ_rad, enable=enable_dice)
         end_rect = end_turn_button(screen, value_font, circ_center, enable=can_end_turn())
-        trade_rect = trade_button(screen, value_font, circ_center, enable=True)                
+        trade_rect = trade_button(screen, value_font, circ_center, enable=True)
         manage_rect = manage_button(screen, value_font, circ_center, enable=True)
 
-        # Draw the houses or hotels 
+        # Draw the houses or hotels
         draw_property_build_badges(screen, game, space_rects)
 
         move_player(screen, game.players, board_size, corner_size, space_size)
-        
+
         # Show the player stats
         player_cards.create_player_card(screen, game.players, player_idx, board_size, space_size, screen_width, screen_height, game)
 
-        # Display dice roll and total 
+        # Display dice roll and total
         if rolled:
             dice.draw_dice(screen, rolled, circ_center[0] - 200, circ_center[1] - 200)
             dice.draw_total(screen, rolled, circ_center[0], circ_center[1] - 350, value_font)
 
             if is_doubles:
                 doubles_text = value_font.render("You rolled doubles!", True, (0, 0, 0))
-                screen.blit(doubles_text, (circ_center[0] - doubles_text.get_width()//2, circ_center[1] - 300)) # 100
+                screen.blit(doubles_text, (circ_center[0] - doubles_text.get_width()//2, circ_center[1] - 300))
 
-            if len(doubles_rolled) >= 3:
-                jail_text = value_font.render("Too Many Doubles Rolled, Go To Jail", True, (255, 0, 0))
-                screen.blit(jail_text, (circ_center[0] - jail_text.get_width()//2, circ_center[1] - 250))    # 150
-         
-        # If there is a pending display, draw one of them 
+        # If there is a pending display, draw one of them
         if game.game_over:
             cx, cy = board_center
             draw_winner_modal(screen, game, value_font, value_font, cx, cy)
 
-        # Show what chance card the player gets 
+        # Show what chance card the player gets
         elif game.last_drawn_card:
             p = game.pending_card["player"]
             card = game.pending_card["card"]
@@ -1069,7 +1087,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                 if human_tax_started_at is None:
                     human_tax_started_at = pygame.time.get_ticks()
                 draw_tax_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
-        
+
         elif game.pending_jail:
             p = game.pending_jail.get("player")
             draw_jail_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
@@ -1087,7 +1105,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
             else:
                 if human_jail_notice_started_at is None:
                     human_jail_notice_started_at = pygame.time.get_ticks()
-        
+
         elif game.pending_jail_turn:
             p = game.pending_jail_turn.get("player")
             draw_jail_turn_choice_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
@@ -1104,7 +1122,6 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     owned_props = sum(1 for s in props if getattr(s, "owner", None) is not None)
                     owned_ratio = owned_props / total_props
                     EARLY = owned_ratio < 0.50
-                    LATE  = owned_ratio >= 0.75
                     forced_third = (p.jail_turns >= 2)
 
                     if EARLY:
@@ -1120,8 +1137,6 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                             if p.in_jail:
                                 advance_to_next()
                                 ai_jail_turn_started_at = None
-                                # Skip the rest of this frame after advancing
-                                pass
                     else:
                         if forced_third:
                             if p.get_out_of_jail_free_cards > 0:
@@ -1136,7 +1151,6 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                                 if p.in_jail:
                                     advance_to_next()
                                     ai_jail_turn_started_at = None
-                                    pass
                         else:
                             game.roll_for_doubles_from_jail(p)
                             rolled = (game.dice.die1_value, game.dice.die2_value)
@@ -1145,15 +1159,14 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                             if p.in_jail:
                                 advance_to_next()
                                 ai_jail_turn_started_at = None
-                                pass
 
-                    # Clear timer after acting (if we didn't early-return above)
+                    # Clear timer after acting
                     ai_jail_turn_started_at = None
 
             else:
                 if human_jail_turn_started_at is None:
                     human_jail_turn_started_at = pygame.time.get_ticks()
-        
+
         elif game.pending_debt:
             draw_debt_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
@@ -1172,7 +1185,8 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                 ai_bankrupt_started_at = None
             # Human: click handler already gates on ready(human_bankrupt_started_at)
 
-        elif game.pending_trade:
+        elif game.pending_trade and not trade_edit_open:
+            # Draw the review; AI auto-decides after min read time below.
             acc_r, rej_r, ctr_r = draw_trade_review_modal(
                 screen, game, value_font, text_font, board_center[0], board_center[1]
             )
@@ -1182,30 +1196,61 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
             if responder and is_ai_player(responder):
                 if ai_trade_started_at is None:
                     ai_trade_started_at = pygame.time.get_ticks()
+
                 elif elapsed(ai_trade_started_at):
-                    # --- Simple AI policy: accept if favorable, else counter by +50 cash, else reject ---
-                    delta = game.rough_trade_delta_for(responder)
-                    if delta >= 0:
+                    # Simple AI policy: accept if favorable; else try a small mirrored counter; else reject
+                    t = game.pending_trade
+                    me = responder
+
+                    # Determine my side in current pending offer
+                    if me is t["left"]:
+                        my_now = t["offer_left"]
+                        opp_now = t["offer_right"]
+                    else:
+                        my_now = t["offer_right"]
+                        opp_now = t["offer_left"]
+
+                    # Accept if engine says it's >= 0 for me
+                    try:
+                        delta_for_me = game.rough_trade_delta_for(me)
+                    except Exception:
+                        delta_for_me = 0
+
+                    if delta_for_me >= 0:
                         ok, msg = game.accept_trade()
                         print(msg)
+                        ai_trade_started_at = None
+
                     else:
-                        # try a one-step counter: ask the other side to add +$50 more
-                        t = game.pending_trade
-                        # Build new offers in flipped orientation for counter()
-                        new_offer_left  = dict(t["offer_right"])  # responder becomes "left" in counter()
+                        # Build a small counter by mirroring and nudging cash by -$50 on my side
+                        new_offer_left  = dict(t["offer_right"])
                         new_offer_right = dict(t["offer_left"])
-                        # ask for +$50 for responder (which is "left" in counter orientation)
-                        new_offer_left["cash"] = int(new_offer_left.get("cash",0)) + 50
+
+                        # If I was left in the current trade, in the mirrored counter I become right
+                        my_counter_side = "right" if (me is t["left"]) else "left"
+
+                        if my_counter_side == "left":
+                            new_offer_left["cash"]  = int(new_offer_left.get("cash", 0)) - 50
+                        else:
+                            new_offer_right["cash"] = int(new_offer_right.get("cash", 0)) - 50
+
                         ok, msg = game.counter_trade(new_offer_left, new_offer_right)
                         print(msg)
-                    ai_trade_started_at = None
+                        ai_trade_started_at = None
+                    
+                    # Block fresh trades by either side for the rest of this turn
+                    t2 = game.pending_trade or t  # if trade closed, use last known t
+                    left_p, right_p = t2["left"], t2["right"]
+                    if hasattr(game, "_trade_attempted_this_turn"):
+                        game._trade_attempted_this_turn.update({ left_p, right_p })
+
             else:
                 if human_trade_started_at is None:
                     human_trade_started_at = pygame.time.get_ticks()
 
         elif selected_space is not None:
             property_characteristic(screen, selected_space, board_size, screen_height)
-        
+
         if manage_select_open:
             draw_manage_select_modal(
                 screen, game.players[player_idx], game.board,
@@ -1234,6 +1279,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     pygame.quit()
     sys.exit()
 
+
 if __name__ == "__main__":
     # names_or_count = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
     # if isinstance(names_or_count, list):
@@ -1241,6 +1287,7 @@ if __name__ == "__main__":
     # else:
     #     # fallback: old flow where only number was returned
     #     player_names = [f"Player {i+1}" for i in range(int(names_or_count))]
-    
-    player_names = ["AI 1", "AI 2", "AI 3", "AI 4"]
-    running_display(player_names, popup_delay_ms=5)
+
+    player_names = ["AI 1", "Troy", "Thomas", "Tenzin"]
+    # player_names = ["AI 1", "AI 2", "AI 3", "AI 4"]
+    running_display(player_names, popup_delay_ms=500)

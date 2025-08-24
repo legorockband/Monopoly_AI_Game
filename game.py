@@ -1163,6 +1163,8 @@ class Game:
             "offer_left": offer_left,
             "offer_right": offer_right,
             "responder": right,     # right responds first to left’s proposal
+            "prev":None,
+            "ctr_n":0,
         }
 
     def accept_trade(self):
@@ -1192,6 +1194,13 @@ class Game:
         if not t:
             return False, "No trade pending."
 
+        # Count how many counters have already happened in this negotiation chain
+        prior = t.get("ctr_n", 0)
+        if prior >= 2:
+            # Auto-decline after 2 counters total
+            self.pending_trade = None
+            return True, "Trade auto-declined (limit of 2 counters reached)."
+
         # Flip roles: responder becomes proposer
         self.pending_trade = {
             "left": t["right"],
@@ -1199,6 +1208,8 @@ class Game:
             "offer_left": new_offer_left,
             "offer_right": new_offer_right,
             "responder": t["left"],
+            "prev":t,
+            "ctr_n":prior + 1   # Increase counter offers by 1
         }
         return True, "Counter sent."
 
@@ -1227,6 +1238,59 @@ class Game:
         )
         return val_i_get - val_i_give
 
+    def would_grant_monopoly(self, who, offer_get, offer_give) -> bool:
+        """
+        Return True if, after applying (get/give) for 'who', they would own
+        *all* properties of any color group.
+        """
+        # Start from current owned set (properties only)
+        owned_after = {sp for sp in who.properties_owned if getattr(sp, "type", "") == "Property"}
+
+        # Remove what 'who' would give
+        for sp in offer_give.get("props", []):
+            if getattr(sp, "type", "") == "Property" and sp in owned_after:
+                owned_after.remove(sp)
+
+        # Add what 'who' would receive
+        for sp in offer_get.get("props", []):
+            if getattr(sp, "type", "") == "Property":
+                owned_after.add(sp)
+
+        # Build color groups on the board
+        groups = {}
+        for sp in self.board.spaces:
+            if getattr(sp, "type", "") == "Property":
+                groups.setdefault(getattr(sp, "color_group", None), []).append(sp)
+
+        # If any color group (size >=2) is fully in owned_after, it's a monopoly
+        for color, group in groups.items():
+            if len(group) >= 2 and all(sp in owned_after for sp in group):
+                return True
+        return False
+
+    def would_break_pair_without_monopoly(self, who, offer_get, offer_give) -> bool:
+        """
+        Return True if, after applying (get/give) for 'who', they would break a 2-of-a-color
+        pair they currently hold, AND they do not gain any monopoly from this deal.
+        """
+        # Count current color ownership
+        cur_counts = {}
+        for sp in who.properties_owned:
+            if getattr(sp, "type", "") == "Property":
+                col = getattr(sp, "color_group", None)
+                cur_counts[col] = cur_counts.get(col, 0) + 1
+
+        # Which colors are currently pairs (== 2)
+        current_pairs = {c for c, n in cur_counts.items() if n == 2}
+
+        # If we wouldn’t gain a monopoly, breaking a pair is bad
+        if not self.would_grant_monopoly(who, offer_get, offer_give):
+            # Are we giving away anything from a current pair?
+            for sp in offer_give.get("props", []):
+                if getattr(sp, "type", "") == "Property":
+                    if getattr(sp, "color_group", None) in current_pairs:
+                        return True
+        return False
 
 if __name__ == "__main__":
 

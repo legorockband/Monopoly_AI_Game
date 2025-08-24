@@ -338,8 +338,8 @@ def move_player(screen:pygame.Surface, players, board_size:int, corner_size:int,
             pygame.draw.rect(screen, (0,0,0), (x, y, TOKEN, TOKEN), 1)
 
 def display_card(screen:pygame.Surface, current_player, card, board_size, screen_height):
-    card_width = 200
-    card_height = 250
+    card_width = 250
+    card_height = 350
     card_x = board_size // 2 - card_width // 2
     card_y = screen_height // 2 - card_height // 2
 
@@ -361,7 +361,7 @@ def display_card(screen:pygame.Surface, current_player, card, board_size, screen
 
     # Show which player needs to do certain action
     player_text = descript_font.render(f"{current_player.name}", True, current_player.color)
-    screen.blit(player_text, (card_x + (card_width - title_text.get_width()) // 2, card_y + card_height - 25))
+    screen.blit(player_text, (card_x + (card_width - player_text.get_width()) // 2, card_y + card_height - 25))
 
 def wrap_text(text, font, max_width):
     # Breaks text into lines that fit within max_width
