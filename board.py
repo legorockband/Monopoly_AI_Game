@@ -21,7 +21,7 @@ spaces_names = [
 ]
 
 # shorter for the boxes for now
-## (<Name>, <Cost for Property>, <Color of Property: (R, G, B)>)
+# (<Name>, <Cost for Property>, <Color of Property: (R, G, B)>)
 spaces_names_2 = [
     ("MA", "$60", (150, 75, 0)), ("CC", None, None), ("BA", "$60", (150, 75, 0)), ("Tax", "Pay $200", None), ("RR", "$200", None), ("OA", "$100", (173, 216, 230)), ("Ch", None, None), ("VA", "$100", (173, 216, 230)), ("CA", "$120", (173, 216, 230)),     # Bottom row (0–8)
     ("SCP", "$140", (255, 0, 255)), ("EC", "$150", None), ("SA", "$140", (255, 0, 255)), ("VA", "$160", (255, 0, 255)), ("PRR", "$200", None), ("SJP", "$180", (255, 165, 0)), ("CC", None, None), ("TA", "$180", (255, 165, 0)), ("NYA", "$200", (255, 165, 0)),  # Left row (9–17)
@@ -1007,6 +1007,72 @@ def draw_trade_editor_modal(screen, p_left, p_right, offer, cx, cy):
     rects["cancel"]  = cancel_rect
     return rects
 
+def draw_trade_review_modal(screen, game, value_font, text_font, cx, cy):
+    """
+    Returns (accept_rect, reject_rect, counter_rect).
+    Shows both sides' offers and three buttons.
+    """
+    t = game.pending_trade
+    if not t:
+        return None, None, None
+
+    W, H = 720, 420
+    r = pygame.Rect(cx - W//2, cy - H//2, W, H)
+    pygame.draw.rect(screen, (255,255,224), r, border_radius=12)
+    pygame.draw.rect(screen, (0, 0, 0), r, 2, border_radius=12)
+
+    title = value_font.render("Trade Offer", True, (0, 0, 0))
+    screen.blit(title, (r.centerx - title.get_width()//2, r.y + 16))
+
+    # Left / Right columns
+    col_w = (W - 60) // 2
+    left_x  = r.x + 20
+    right_x = r.x + 40 + col_w
+    top_y = r.y + 70
+
+    def render_offer(x, who, offer, label):
+        name = value_font.render(f"{label}: {who.name}", True, (0,0,0))
+        screen.blit(name, (x, top_y))
+        y = top_y + 36
+
+        cash = text_font.render(f"Cash: ${offer.get('cash',0)}", True, (0,0,0))
+        screen.blit(cash, (x, y)); y += 24
+
+        gojf = text_font.render(f"GOJF: {offer.get('gojf',0)}", True, (0,0,0))
+        screen.blit(gojf, (x, y)); y += 24
+
+        props = offer.get("props", [])
+        props_lbl = text_font.render(f"Properties ({len(props)}):", True, (0,0,0))
+        screen.blit(props_lbl, (x, y)); y += 22
+        for sp in props[:8]:
+            line = text_font.render(f" - {getattr(sp,'name','?')}", True, (40,40,40))
+            screen.blit(line, (x + 16, y)); y += 20
+        if len(props) > 8:
+            more = text_font.render(f"   …and {len(props)-8} more", True, (40,40,40))
+            screen.blit(more, (x + 16, y)); y += 20
+
+    render_offer(left_x,  t["left"],  t["offer_left"],  "From Left")
+    render_offer(right_x, t["right"], t["offer_right"], "From Right")
+
+    # Buttons
+    btn_w, btn_h = 140, 44
+    yb = r.bottom - 64
+    spacing = 30
+    accept_rect  = pygame.Rect(r.centerx - (btn_w*3 + spacing*2)//2, yb, btn_w, btn_h)
+    reject_rect  = pygame.Rect(accept_rect.right + spacing, yb, btn_w, btn_h)
+    counter_rect = pygame.Rect(reject_rect.right + spacing, yb, btn_w, btn_h)
+
+    def b(rect, text, color):
+        pygame.draw.rect(screen, color, rect, border_radius=10)
+        lbl = value_font.render(text, True, (255,255,255))
+        screen.blit(lbl, (rect.centerx - lbl.get_width()//2, rect.centery - lbl.get_height()//2))
+
+    b(accept_rect,  "Accept",  (0,160,0))
+    b(reject_rect,  "Reject",  (180,40,40))
+    b(counter_rect, "Counter", (0,120,215))
+
+    return accept_rect, reject_rect, counter_rect
+
 def draw_jail_turn_choice_modal(screen, game, title_font, body_font, cx, cy):
     """
     Shows three buttons for a player who's starting/continuing a jail turn:
@@ -1346,3 +1412,4 @@ def blit_text_with_outline(surface, font, text, pos, color, outline_color=(0,0,0
             shadow = font.render(text, True, outline_color)
             surface.blit(shadow, (x+dx, y+dy))
     surface.blit(base, (x, y))
+

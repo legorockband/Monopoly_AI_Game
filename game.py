@@ -705,6 +705,7 @@ class Game:
         self.pending_jail_turn = None
         self.pending_debt = None
         self.pending_bankrupt_notice = None
+        self.pending_trade = None
         self.houses_remaining = 32
         self.hotels_remaining = 12
 
@@ -1149,6 +1150,83 @@ class Game:
         else:
             print(f"  {player.name} could not roll doubles and remains in Jail.")
         self.pending_jail_turn = None
+
+    def start_trade_proposal(self, left, right, offer_left, offer_right):
+        """
+        Save a proposal for review. 'left' and 'right' are Player objects.
+        offer_* are dicts like: {"cash": int, "gojf": int, "props": list[Space]}
+        The 'responder' is the player who must accept/reject/counter next.
+        """
+        self.pending_trade = {
+            "left": left,
+            "right": right,
+            "offer_left": offer_left,
+            "offer_right": offer_right,
+            "responder": right,     # right responds first to left’s proposal
+        }
+
+    def accept_trade(self):
+        """Apply the current proposal and clear it."""
+        t = self.pending_trade
+        if not t:
+            return False, "No trade pending."
+        ok, msg = self.execute_trade(
+            t["left"], t["right"], t["offer_left"], t["offer_right"]
+        )
+        self.pending_trade = None
+        return ok, msg
+
+    def reject_trade(self):
+        """Close the current proposal without changes."""
+        if not self.pending_trade:
+            return False, "No trade pending."
+        self.pending_trade = None
+        return True, "Trade rejected."
+
+    def counter_trade(self, new_offer_left, new_offer_right):
+        """
+        Flip proposer/responder and install new offers.
+        Caller should pass offers in the "current left/right" orientation.
+        """
+        t = self.pending_trade
+        if not t:
+            return False, "No trade pending."
+
+        # Flip roles: responder becomes proposer
+        self.pending_trade = {
+            "left": t["right"],
+            "right": t["left"],
+            "offer_left": new_offer_left,
+            "offer_right": new_offer_right,
+            "responder": t["left"],
+        }
+        return True, "Counter sent."
+
+    # --- Optional: rough value estimator used by the AI ---
+    def _rough_offer_value(self, offer):
+        v = 0
+        v += int(offer.get("cash", 0))
+        v += int(offer.get("gojf", 0)) * 100
+        for sp in offer.get("props", []):
+            v += getattr(sp, "cost", 0)
+        return v
+
+    def rough_trade_delta_for(self, who):
+        """
+        Positive means the pending trade (if accepted now) is favorable for 'who'.
+        Very rough heuristic: cash + GOJF(100) + property cost.
+        """
+        t = self.pending_trade
+        if not t:
+            return 0
+        val_i_get = self._rough_offer_value(
+            t["offer_right"] if who is t["left"] else t["offer_left"]
+        )
+        val_i_give = self._rough_offer_value(
+            t["offer_left"]  if who is t["left"] else t["offer_right"]
+        )
+        return val_i_get - val_i_give
+
 
 if __name__ == "__main__":
 

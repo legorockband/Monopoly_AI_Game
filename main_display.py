@@ -140,12 +140,16 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     ordered_players = roll_for_first(game, screen, board_center, value_font)
     game.players = ordered_players
 
+    # Prevents clicks during the ordering screen
+    pygame.event.clear()
+
     # Assign player colors in the new order so UI reflects turn order
     for i, player in enumerate(game.players):
         player.color = player_colors[i % len(player_colors)]
 
     running = True
     rolled = None
+    space_rects = {}
 
     # --- AI Timers ---
     ai_jail_notice_started_at = None
@@ -155,6 +159,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     ai_bankrupt_started_at = None
     ai_card_started_at = None         
     ai_purchase_started_at = None
+    ai_trade_started_at = None
 
     # --- Human timers  ---
     human_card_started_at = None
@@ -164,6 +169,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     human_jail_notice_started_at = None
     human_jail_turn_started_at = None
     human_bankrupt_started_at = None
+    human_trade_started_at = None
 
     def elapsed(start):
         return start is not None and (pygame.time.get_ticks() - start) >= AUTO_DELAY_MS
@@ -377,6 +383,16 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                 ai_bankrupt_started_at = now
             if human_bankrupt_started_at is None:
                 human_bankrupt_started_at = now
+
+        # Trade review timer stamping
+        if game.pending_trade:
+            responder = game.pending_trade.get("responder")
+            if responder and is_ai_player(responder):
+                if ai_trade_started_at is None:
+                    ai_trade_started_at = now
+            else:
+                if human_trade_started_at is None:
+                    human_trade_started_at = now
 
         # === Auto-resolve AI popups AFTER the minimum read delay =========
         if cur and is_ai_player(cur):
@@ -646,6 +662,68 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                         human_bankrupt_started_at = None
                     continue
 
+                # --- TRADE REVIEW modal blocks everything else ---
+                if game.pending_trade:
+                    responder = game.pending_trade.get("responder")
+                    cx, cy = board_center
+                    acc_r, rej_r, ctr_r = draw_trade_review_modal(
+                        screen, game, value_font, text_font, cx, cy
+                    )
+
+                    # Enforce min read time for humans
+                    if responder and (not is_ai_player(responder)) and (not ready(human_trade_started_at)):
+                        continue
+
+                    if acc_r.collidepoint(mouse_pos):
+                        ok, msg = game.accept_trade()
+                        print(msg)
+                        human_trade_started_at = None
+                    elif rej_r.collidepoint(mouse_pos):
+                        ok, msg = game.reject_trade()
+                        print(msg)
+                        human_trade_started_at = None
+                    
+                    elif ctr_r.collidepoint(mouse_pos):
+                        # Open the editor prefilled for COUNTER by the responder.
+                        # We make responder the left side in the editor for clarity.
+                        # Figure out indices and seed 'trade_offer' sets from current proposal.
+                        t = game.pending_trade
+                        iL = game.players.index(responder)
+                        # Find the other participant:
+                        other = t["left"] if responder is t["right"] else t["right"]
+                        iR = game.players.index(other)
+                        trade_pair = (iL, iR)
+                        trade_edit_open = True
+
+                        # Prefill with current "what responder gives/gets" mirrored to editor sides
+                        trade_offer = {"left":{"cash":0,"gojf":0,"props":set()},
+                                       "right":{"cash":0,"gojf":0,"props":set()}}
+
+                        if responder is t["right"]:
+                            # Responder (right) becomes editor 'left'
+                            trade_offer["left"]["cash"] = t["offer_right"].get("cash",0)
+                            trade_offer["left"]["gojf"] = t["offer_right"].get("gojf",0)
+                            trade_offer["left"]["props"] = { id(sp) for sp in t["offer_right"].get("props",[]) }
+
+                            trade_offer["right"]["cash"] = t["offer_left"].get("cash",0)
+                            trade_offer["right"]["gojf"] = t["offer_left"].get("gojf",0)
+                            trade_offer["right"]["props"] = { id(sp) for sp in t["offer_left"].get("props",[]) }
+                        else:
+                            # Responder (left) becomes editor 'left'
+                            trade_offer["left"]["cash"] = t["offer_left"].get("cash",0)
+                            trade_offer["left"]["gojf"] = t["offer_left"].get("gojf",0)
+                            trade_offer["left"]["props"] = { id(sp) for sp in t["offer_left"].get("props",[]) }
+
+                            trade_offer["right"]["cash"] = t["offer_right"].get("cash",0)
+                            trade_offer["right"]["gojf"] = t["offer_right"].get("gojf",0)
+                            trade_offer["right"]["props"] = { id(sp) for sp in t["offer_right"].get("props",[]) }
+
+                        # Close the review modal visually (but keep game.pending_trade)
+                        # The editor's Confirm click will call game.counter_trade(...)
+                        game.pending_trade = None
+                        human_trade_started_at = None
+                    continue  # block others while trade modal is up
+
                 if selected_space is not None:
                     selected_space = None
                     continue
@@ -693,28 +771,38 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                         for key, r in rects.items():
                             if (key.startswith("hit_") or key.startswith("box_")) and r.collidepoint(mouse_pos):
                                 clicked_box = key; break
+                        
                         if clicked_box:
                             _, side, pid_str = clicked_box.split("_", 2)
                             pid = int(pid_str)
                             s = trade_offer[side]["props"]
                             if pid in s: s.remove(pid)
                             else: s.add(pid)
+                        
                         elif rects["confirm"].collidepoint(mouse_pos):
                             # Build concrete offers using id->object resolution
                             left_props  = [sp for sp in game.players[iL].properties_owned if id(sp) in trade_offer["left"]["props"]]
                             right_props = [sp for sp in game.players[iR].properties_owned if id(sp) in trade_offer["right"]["props"]]
-                            ok, msg = game.execute_trade(
-                                game.players[iL], game.players[iR],
-                                {"cash": trade_offer["left"]["cash"],  "gojf": trade_offer["left"]["gojf"],  "props": left_props},
-                                {"cash": trade_offer["right"]["cash"], "gojf": trade_offer["right"]["gojf"], "props": right_props},
-                            )
-                            print(msg)
-                            # Reset UI regardless; if failed, user can re-open and try again.
+
+                            offerL = {"cash": trade_offer["left"]["cash"],  "gojf": trade_offer["left"]["gojf"],  "props": left_props}
+                            offerR = {"cash": trade_offer["right"]["cash"], "gojf": trade_offer["right"]["gojf"], "props": right_props}
+
+                            # If a trade is already pending and *this* user is the responder, this is a COUNTER.
+                            if game.pending_trade and game.pending_trade.get("responder") is game.players[iL]:
+                                ok, msg = game.counter_trade(offerL, offerR)
+                                print(msg)
+                            else:
+                                # Fresh proposal (iL proposes to iR)
+                                game.start_trade_proposal(game.players[iL], game.players[iR], offerL, offerR)
+                                print(f"{game.players[iL].name} proposed a trade to {game.players[iR].name}.")
+
+                            # Reset UI (close editor)
                             trade_editor_rects = None
                             trade_edit_open = False
                             trade_pair = None
                             trade_selected.clear()
                             trade_offer = {"left":{"cash":0,"gojf":0,"props":set()}, "right":{"cash":0,"gojf":0,"props":set()}}
+                        
                         elif rects["cancel"].collidepoint(mouse_pos):
                             trade_edit_open = False
                             trade_pair = None
@@ -931,7 +1019,6 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                 if human_card_started_at is None:
                     human_card_started_at = pygame.time.get_ticks()
 
-
         elif game.pending_purchase:
             draw_purchase_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
@@ -1027,6 +1114,37 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                 ai_bankrupt_started_at = None
             # Human: click handler already gates on ready(human_bankrupt_started_at)
 
+        elif game.pending_trade:
+            acc_r, rej_r, ctr_r = draw_trade_review_modal(
+                screen, game, value_font, text_font, board_center[0], board_center[1]
+            )
+            responder = game.pending_trade.get("responder")
+
+            # Start minimum read timers
+            if responder and is_ai_player(responder):
+                if ai_trade_started_at is None:
+                    ai_trade_started_at = pygame.time.get_ticks()
+                elif elapsed(ai_trade_started_at):
+                    # --- Simple AI policy: accept if favorable, else counter by +50 cash, else reject ---
+                    delta = game.rough_trade_delta_for(responder)
+                    if delta >= 0:
+                        ok, msg = game.accept_trade()
+                        print(msg)
+                    else:
+                        # try a one-step counter: ask the other side to add +$50 more
+                        t = game.pending_trade
+                        # Build new offers in flipped orientation for counter()
+                        new_offer_left  = dict(t["offer_right"])  # responder becomes "left" in counter()
+                        new_offer_right = dict(t["offer_left"])
+                        # ask for +$50 for responder (which is "left" in counter orientation)
+                        new_offer_left["cash"] = int(new_offer_left.get("cash",0)) + 50
+                        ok, msg = game.counter_trade(new_offer_left, new_offer_right)
+                        print(msg)
+                    ai_trade_started_at = None
+            else:
+                if human_trade_started_at is None:
+                    human_trade_started_at = pygame.time.get_ticks()
+
         elif selected_space is not None:
             property_characteristic(screen, selected_space, board_size, screen_height)
         
@@ -1059,12 +1177,12 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     sys.exit()
 
 if __name__ == "__main__":
-    # names_or_count = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
-    # if isinstance(names_or_count, list):
-    #     player_names = names_or_count
-    # else:
-    #     # fallback: old flow where only number was returned
-    #     player_names = [f"Player {i+1}" for i in range(int(names_or_count))]
+    names_or_count = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
+    if isinstance(names_or_count, list):
+        player_names = names_or_count
+    else:
+        # fallback: old flow where only number was returned
+        player_names = [f"Player {i+1}" for i in range(int(names_or_count))]
     
-    player_names = ["AI 1", "AI 2"]
+    # player_names = ["AI 1", "AI 2"]
     running_display(player_names, popup_delay_ms=0)
