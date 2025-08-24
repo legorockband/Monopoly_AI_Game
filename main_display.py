@@ -2,12 +2,14 @@ import pygame
 import sys
 import os
 import ctypes
+import time
 
 import dice
 from board import *
 import title_screen
 import player_cards
 from game import Game
+from ai_mcts import MCTSMonopolyBot
 
 pygame.init()
 screen = pygame.display.set_mode((0, 0), pygame.RESIZABLE)
@@ -41,12 +43,17 @@ player_colors = [(0,0,255), (0,255,0), (255,0,0), (0, 255, 255)]
 
 board_center = (board_size//2, board_size//2)
 
-def running_display(player_names: list[str]):
+# --- Global popup delay (ms). You can override at runtime via env or by passing a param to running_display ---
+DEFAULT_POPUP_DELAY_MS = int(os.getenv("POPUP_DELAY_MS", "800"))  # set to "0" for instant
+
+def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     game = Game(player_names=player_names)
+
+    # Resolve the actual delay (env-backed default; per-call override allowed)
+    AUTO_DELAY_MS = DEFAULT_POPUP_DELAY_MS if popup_delay_ms is None else max(0, int(popup_delay_ms))
 
     # --- Centered roll-off with per-player delay, full order display, and tie re-roll for first place ---
     def roll_for_first(game, screen, board_center, value_font):
-        import pygame
         players_in_order = list(game.players)   # preserve initial order for stable tie-breaking
         roll_sum = {p: None for p in players_in_order}
 
@@ -140,6 +147,31 @@ def running_display(player_names: list[str]):
     running = True
     rolled = None
 
+    # --- AI Timers ---
+    ai_jail_notice_started_at = None
+    ai_jail_turn_started_at = None
+    ai_rent_started_at = None
+    ai_tax_started_at = None
+    ai_bankrupt_started_at = None
+    ai_card_started_at = None         
+    ai_purchase_started_at = None
+
+    # --- Human timers  ---
+    human_card_started_at = None
+    human_purchase_started_at = None
+    human_rent_started_at = None
+    human_tax_started_at = None
+    human_jail_notice_started_at = None
+    human_jail_turn_started_at = None
+    human_bankrupt_started_at = None
+
+    def elapsed(start):
+        return start is not None and (pygame.time.get_ticks() - start) >= AUTO_DELAY_MS
+
+    def ready(start):
+        # Clicks are allowed immediately if delay==0, else after min read time
+        return (AUTO_DELAY_MS == 0) or elapsed(start)
+    
     doubles_rolled = []
     is_doubles = False
     has_rolled = False
@@ -164,20 +196,33 @@ def running_display(player_names: list[str]):
 
     def advance_to_next():
         nonlocal player_idx, rolled, is_doubles, has_rolled
+        nonlocal ai_jail_notice_started_at, ai_jail_turn_started_at, ai_rent_started_at, ai_tax_started_at, ai_bankrupt_started_at, ai_card_started_at, ai_purchase_started_at
+        nonlocal human_card_started_at, human_purchase_started_at, human_rent_started_at, human_tax_started_at
+        nonlocal human_jail_notice_started_at, human_jail_turn_started_at, human_bankrupt_started_at
+
         if len(game.players) == 0:
             return
-        # Step to next player
         player_idx = (player_idx + 1) % len(game.players)
-        # Reset per-turn flags
-        rolled = None
-        is_doubles = False
-        has_rolled = False
-        # Keep the Game object’s index in sync in case any logic reads it
+        rolled = None; is_doubles = False; has_rolled = False
+
+        # reset timers each turn
+        ai_card_started_at = None
+        ai_purchase_started_at = None
+        ai_jail_notice_started_at = ai_jail_turn_started_at = None
+        ai_rent_started_at = ai_tax_started_at = ai_bankrupt_started_at = None
+        
+        human_card_started_at = human_purchase_started_at = None
+        human_rent_started_at = human_tax_started_at = None
+        human_jail_notice_started_at = human_jail_turn_started_at = None
+        human_bankrupt_started_at = None
+
         game.current_player_index = player_idx
-        # If next player is in jail, open their jail-turn modal immediately
         nxt = game.players[player_idx]
         if nxt.in_jail and not game.pending_jail_turn:
             game.start_jail_turn(nxt)
+
+    def is_ai_player(p):
+        return isinstance(getattr(p, "name", None), str) and p.name.strip().lower().startswith("ai")
 
     while running:
         # Check if any popups are going to happen
@@ -189,7 +234,205 @@ def running_display(player_names: list[str]):
                 manage_select_open
             )
 
+        cur = game.players[player_idx] if game.players else None
+        if cur and is_ai_player(cur):
+            # 1) If the "Go To Jail" modal is up, acknowledge it after delay (drawn below)
+            if game.pending_jail:
+                p = game.pending_jail.get("player")
+                if p is cur and ai_jail_notice_started_at is None:
+                    ai_jail_notice_started_at = pygame.time.get_ticks()
 
+            # 2) Jail turn choice -> wait, then act
+            if game.pending_jail_turn and game.pending_jail_turn.get("player") is cur:
+                now = pygame.time.get_ticks()
+                if ai_jail_turn_started_at is None:
+                    ai_jail_turn_started_at = now
+                elif now - ai_jail_turn_started_at >= AUTO_DELAY_MS:
+                    # --- Board saturation -> phase detection ---
+                    props = [s for s in game.board.spaces if getattr(s, "type", "") == "Property"]
+                    total_props = len(props) or 1
+                    owned_props = sum(1 for s in props if getattr(s, "owner", None) is not None)
+                    owned_ratio = owned_props / total_props
+                    EARLY = owned_ratio < 0.50
+                    LATE  = owned_ratio >= 0.75
+                    forced_third = (cur.jail_turns >= 2)
+
+                    if EARLY:
+                        if cur.get_out_of_jail_free_cards > 0:
+                            game.use_gojf_and_exit(cur)
+                        elif cur.money >= 50:
+                            game.pay_fine_and_exit(cur)
+                        else:
+                            game.roll_for_doubles_from_jail(cur)
+                            rolled = (game.dice.die1_value, game.dice.die2_value)
+                            is_doubles = (rolled[0] == rolled[1])
+                            has_rolled = True
+                            if cur.in_jail:
+                                advance_to_next()
+                                ai_jail_turn_started_at = None
+                                continue
+                    else:
+                        if forced_third:
+                            if cur.get_out_of_jail_free_cards > 0:
+                                game.use_gojf_and_exit(cur)
+                            elif cur.money >= 50:
+                                game.pay_fine_and_exit(cur)
+                            else:
+                                game.roll_for_doubles_from_jail(cur)
+                                rolled = (game.dice.die1_value, game.dice.die2_value)
+                                is_doubles = (rolled[0] == rolled[1])
+                                has_rolled = True
+                                if cur.in_jail:
+                                    advance_to_next()
+                                    ai_jail_turn_started_at = None
+                                    continue
+                        else:
+                            game.roll_for_doubles_from_jail(cur)
+                            rolled = (game.dice.die1_value, game.dice.die2_value)
+                            is_doubles = (rolled[0] == rolled[1])
+                            has_rolled = True
+                            if cur.in_jail:
+                                advance_to_next()
+                                ai_jail_turn_started_at = None
+                                continue
+
+                    # clear the timer after acting
+                    ai_jail_turn_started_at = None
+
+        # === Stamp timers at the start of the frame so both humans and AIs see consistent delays ===
+        now = pygame.time.get_ticks()
+
+        def start_once(var_name):
+            # tiny helper to set a timer variable if it hasn't been set yet
+            nonlocal ai_jail_notice_started_at, ai_jail_turn_started_at, ai_rent_started_at, ai_tax_started_at, ai_bankrupt_started_at
+            nonlocal human_card_started_at, human_purchase_started_at, human_rent_started_at, human_tax_started_at
+            nonlocal human_jail_notice_started_at, human_jail_turn_started_at, human_bankrupt_started_at
+            if globals().get(var_name) is None:  # not strictly necessary, but safe if moved
+                pass  # placeholder to show intent
+
+        # Cards (Chance / Community Chest)
+        if game.last_drawn_card:
+            p = game.pending_card["player"]
+            if is_ai_player(p):
+                if ai_card_started_at is None:
+                    ai_card_started_at = now
+            else:
+                if human_card_started_at is None:
+                    human_card_started_at = now
+
+        # Purchase
+        if game.pending_purchase:
+            p = game.pending_purchase.get("player")
+            if p:
+                if is_ai_player(p):
+                    if ai_purchase_started_at is None:
+                        ai_purchase_started_at = now
+                else:
+                    if human_purchase_started_at is None:
+                        human_purchase_started_at = now
+
+        # Rent
+        if game.pending_rent:
+            p = game.pending_rent.get("player")
+            if p and is_ai_player(p):
+                if ai_rent_started_at is None:
+                    ai_rent_started_at = now
+            else:
+                if human_rent_started_at is None:
+                    human_rent_started_at = now
+
+        # Tax
+        if game.pending_tax:
+            p = game.pending_tax.get("player")
+            if p and is_ai_player(p):
+                if ai_tax_started_at is None:
+                    ai_tax_started_at = now
+            else:
+                if human_tax_started_at is None:
+                    human_tax_started_at = now
+
+        # Go-To-Jail notice
+        if game.pending_jail:
+            p = game.pending_jail.get("player")
+            if p and is_ai_player(p):
+                if ai_jail_notice_started_at is None:
+                    ai_jail_notice_started_at = now
+            else:
+                if human_jail_notice_started_at is None:
+                    human_jail_notice_started_at = now
+
+        # "You're in Jail" choice
+        if game.pending_jail_turn:
+            p = game.pending_jail_turn.get("player")
+            if p and is_ai_player(p):
+                if ai_jail_turn_started_at is None:
+                    ai_jail_turn_started_at = now
+            else:
+                if human_jail_turn_started_at is None:
+                    human_jail_turn_started_at = now
+
+        # Bankruptcy notice
+        if game.pending_bankrupt_notice:
+            if ai_bankrupt_started_at is None:
+                ai_bankrupt_started_at = now
+            if human_bankrupt_started_at is None:
+                human_bankrupt_started_at = now
+
+        # === Auto-resolve AI popups AFTER the minimum read delay =========
+        if cur and is_ai_player(cur):
+            # 1) Chance / Community Chest card
+            if game.last_drawn_card and ai_card_started_at is not None and elapsed(ai_card_started_at):
+                pending_card = game.pending_card
+                game.last_drawn_card = None
+                game.pending_card = None
+                ai_card_started_at = None
+                if pending_card:
+                    card = pending_card["card"]
+                    player_card = pending_card["player"]
+                    card.execute(player_card, game)
+                    if pending_card["type"] == "Chance":
+                        game.chance_cards.append(card)
+                    else:
+                        game.community_chest_cards.append(card)
+
+            # 2) Rent
+            if game.pending_rent and ai_rent_started_at is not None and elapsed(ai_rent_started_at):
+                game.settle_rent()
+                ai_rent_started_at = None
+
+            # 3) Tax
+            if game.pending_tax and ai_tax_started_at is not None and elapsed(ai_tax_started_at):
+                game.confirm_tax()
+                ai_tax_started_at = None
+
+            # 4) Go To Jail notice (acknowledge after showing it)
+            if game.pending_jail and ai_jail_notice_started_at is not None and elapsed(ai_jail_notice_started_at):
+                p = game.pending_jail.get("player")
+                if p is cur:
+                    p.in_jail = True
+                    p.position = game.board.jail_space_index
+                    p.jail_turns = 0
+                    game.pending_jail = None
+                    ai_jail_notice_started_at = None
+                    advance_to_next()
+
+            # 5) Purchase decision (simple fallback: buy if affordable & keep $100 buffer)
+            if game.pending_purchase and ai_purchase_started_at is not None and elapsed(ai_purchase_started_at):
+                info = game.pending_purchase
+                if info and info.get("player") is cur:
+                    affordable = info.get("affordable", True)
+                    prop = info.get("property")
+                    # Conservative default: buy if affordable and leaves ~$100 buffer.
+                    want_buy = bool(affordable and (cur.money - getattr(prop, "cost", 0) >= 100))
+                    game.confirm_purchase(want_buy)
+                ai_purchase_started_at = None
+
+            # 6) Bankrupt notice (close after delay so it's readable)
+            if game.pending_bankrupt_notice and ai_bankrupt_started_at is not None and elapsed(ai_bankrupt_started_at):
+                game.pending_bankrupt_notice = None
+                ai_bankrupt_started_at = None
+
+        # --- Click Handling ---
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -207,40 +450,49 @@ def running_display(player_names: list[str]):
 
                 # Show the Chance/ CC Card
                 if game.last_drawn_card:
-                    pending_card = game.pending_card
-                    game.last_drawn_card = None
-                    game.pending_card = None
+                    p = game.pending_card["player"]
+                    # Humans click to continue; AI resolves elsewhere automatically
+                    if not is_ai_player(p):
+                        if not ready(human_card_started_at):
+                            continue
+                        pending_card = game.pending_card
+                        game.last_drawn_card = None
+                        game.pending_card = None
+                        popup_timer = 0  # ensure cleared
 
-                    # Execute the card effect
-                    if pending_card:
-                        card = pending_card["card"]
-                        player_card = pending_card["player"]
-                        card.execute(player_card, game)
-
-                        # Move the card drawn to the bottom of the deck
-                        if pending_card["type"] == "Chance":
-                            game.chance_cards.append(card)
-                        else:
-                            game.community_chest_cards.append(card)
-
-                    continue
+                        if pending_card:
+                            card = pending_card["card"]
+                            player_card = pending_card["player"]
+                            card.execute(player_card, game)
+                            if pending_card["type"] == "Chance":
+                                game.chance_cards.append(card)
+                            else:
+                                game.community_chest_cards.append(card)
+                    continue  # block other clicks this frame
 
                 # Rent
                 if game.pending_rent:
                     cx, cy = board_center
                     pay_rect = pygame.Rect(cx - 55, cy + 30, 110, 44)
+                    p = game.pending_rent.get("player")
+                    if p and not is_ai_player(p) and not ready(human_rent_started_at):
+                        continue
                     if pay_rect.collidepoint(mouse_pos):
                         game.settle_rent()
-
-                    # block all other clicks while modal is visible
+                        human_rent_started_at = None
                     continue
 
                 # Tax
                 if game.pending_tax:
-                    cx, cy = board_center
-                    pay_rect = pygame.Rect(cx - 55, cy + 30, 110, 44)
-                    if pay_rect.collidepoint(mouse_pos):
-                        game.confirm_tax()
+                    tp = game.pending_tax.get("player")
+                    if tp and not is_ai_player(tp):
+                        if not ready(human_tax_started_at):
+                            continue
+                        cx, cy = board_center
+                        pay_rect = pygame.Rect(cx - 55, cy + 30, 110, 44)
+                        if pay_rect.collidepoint(mouse_pos):
+                            game.confirm_tax()
+                            human_tax_started_at = None
                     continue
 
                 # If BUILD/MANAGE modal is up: only allow its buttons
@@ -268,72 +520,67 @@ def running_display(player_names: list[str]):
                 # If a purchase is pending, only handle BUY / SKIP clicks
                 if game.pending_purchase:
                     buy_rect, skip_rect = purchase_button_rects(board_center[0], board_center[1] + 55)
+                    is_human = not is_ai_player(game.pending_purchase["player"])
+                    if is_human and not ready(human_purchase_started_at):
+                        continue
+
                     affordable = game.pending_purchase.get("affordable", True)
 
                     if buy_rect.collidepoint(mouse_pos):
                         if affordable:   # ignore clicks if not affordable (greyed out)
                             game.confirm_purchase(True)
-
+                            if is_human: human_purchase_started_at = None
+                    
                     elif skip_rect.collidepoint(mouse_pos):
                         game.confirm_purchase(False)
-
+                        if is_human: human_purchase_started_at = None
                     continue
                 
                 # Jail popup
                 if game.pending_jail:
                     cx, cy = board_center
-                    ok_rect = pygame.Rect(cx - 55, cy + 30, 110, 44)
+                    ok_rect = draw_jail_modal(screen, game, value_font, text_font, cx, cy)
+                    p = game.pending_jail["player"]
+                    if p and not is_ai_player(p) and not ready(human_jail_notice_started_at):
+                        continue
                     if ok_rect.collidepoint(mouse_pos):
-                        # Now send the player to Jail
-                        p = game.pending_jail["player"]
                         p.in_jail = True
                         p.position = game.board.jail_space_index
                         p.jail_turns = 0
-                        print(f"{p.name} has been moved to Jail.")
                         game.pending_jail = None
-
-                        # Advance to next player so the jail-choice modal won't appear this turn
+                        human_jail_notice_started_at = None
                         advance_to_next()
                     continue
 
                 # Jail-turn choice modal blocks everything else
                 if game.pending_jail_turn:
                     cx, cy = board_center
-                    # Recreate rects for hit-testing to match the draw function layout
-                    rects = draw_jail_turn_choice_modal(
-                        screen, game, value_font, text_font, cx, cy
-                    )
+                    rects = draw_jail_turn_choice_modal(screen, game, value_font, text_font, cx, cy)
                     r_use, r_pay, r_roll = rects["use"], rects["pay"], rects["roll"]
                     p = game.pending_jail_turn["player"]
+                    if p and not is_ai_player(p) and not ready(human_jail_turn_started_at):
+                        continue
+                    
                     if r_use and r_use.collidepoint(mouse_pos):
                         game.use_gojf_and_exit(p)
-                        # player is now free; keep their turn so they can roll from space 10
-                        rolled = None
-                        is_doubles = False
-                        has_rolled = False
+                        human_jail_turn_started_at = None
+                        rolled = None; is_doubles = False; has_rolled = False
                         continue
-
+                    
                     if r_pay and r_pay.collidepoint(mouse_pos):
                         game.pay_fine_and_exit(p)
-                        # player is now free; keep their turn so they can roll from space 10
-                        rolled = None
-                        is_doubles = False
-                        has_rolled = False
+                        human_jail_turn_started_at = None
+                        rolled = None; is_doubles = False; has_rolled = False
                         continue
+                    
                     if r_roll and r_roll.collidepoint(mouse_pos):
                         game.roll_for_doubles_from_jail(p)
-                        # If still in jail, their turn ends immediately; advance to next player
+                        human_jail_turn_started_at = None
                         rolled = (game.dice.die1_value, game.dice.die2_value)
                         is_doubles = (rolled[0] == rolled[1])
                         has_rolled = True
                         if p.in_jail:
-                            player_idx = (player_idx + 1) % len(game.players)
-                            is_doubles = False
-                            has_rolled = False
-                            nxt = game.players[player_idx]
-                            if nxt.in_jail and not game.pending_jail_turn:
-                                game.start_jail_turn(nxt)
-                        # If freed, they've already rolled & moved; let normal flow continue (may trigger other modals)
+                            advance_to_next()
                         continue
 
                 # --- DEBT MODAL (blocks all other clicks while open) ---
@@ -391,9 +638,12 @@ def running_display(player_names: list[str]):
                 if game.pending_bankrupt_notice:
                     cx, cy = board_center
                     ok_rect = draw_bankrupt_notice(screen, game, value_font, text_font, cx, cy)
+                    if not ready(human_bankrupt_started_at):
+                        continue
+
                     if ok_rect and ok_rect.collidepoint(mouse_pos):
-                        # Just dismiss. Do NOT advance here—flags were handled on click.
                         game.pending_bankrupt_notice = None
+                        human_bankrupt_started_at = None
                     continue
 
                 if selected_space is not None:
@@ -578,6 +828,7 @@ def running_display(player_names: list[str]):
                         is_doubles = False
                         has_rolled = False
                         advance_to_next()                
+                
                 else:
                     player.doubles_rolled_consecutive = 0
 
@@ -596,6 +847,28 @@ def running_display(player_names: list[str]):
 
         enable_dice = ((not has_rolled or is_doubles) and not current_player.in_jail)
 
+        bot = MCTSMonopolyBot(name_prefix="AI")
+        if bot.is_ai(current_player):
+            # If any modal is open, let the UI handle it + delay; DO NOT step the bot now.
+            modals_open = (
+                game.last_drawn_card or game.pending_purchase or game.pending_rent or
+                game.pending_tax or game.pending_build or game.pending_debt or
+                game.pending_jail or game.pending_jail_turn or game.pending_bankrupt_notice
+            )
+            if not modals_open:
+                intent = bot.step(game, current_player, iterations=300)
+                if intent.get("want_roll") and enable_dice:
+                    roll_total, is_doubles = game.dice.roll()
+                    has_rolled = True
+                    rolled = (game.dice.die1_value, game.dice.die2_value)
+                    current_player.move(roll_total, game.board)
+
+            # End turn automatically if allowed
+            if (has_rolled and (not is_doubles) and not (game.pending_build or game.pending_rent or game.pending_purchase or game.last_drawn_card or game.pending_debt or game.pending_jail_turn or game.pending_bankrupt_notice)):
+                advance_to_next()
+
+        enable_dice = ((not has_rolled or is_doubles) and not current_player.in_jail)
+
         # Make interactable buttons
         dice.make_dice_button(screen, circ_color, circ_center, circ_rad, enable=enable_dice)
         end_rect = end_turn_button(screen, value_font, circ_center, enable=can_end_turn())
@@ -609,10 +882,6 @@ def running_display(player_names: list[str]):
         
         # Show the player stats
         player_cards.create_player_card(screen, game.players, player_idx, board_size, space_size, screen_width, screen_height, game)
-
-        # Show what chance card the player gets 
-        if game.last_drawn_card:
-            display_card(screen, game.players[player_idx], game.last_drawn_card, board_size, screen_height)
 
         # Display dice roll and total 
         if rolled:
@@ -628,35 +897,135 @@ def running_display(player_names: list[str]):
                 screen.blit(jail_text, (circ_center[0] - jail_text.get_width()//2, circ_center[1] - 250))    # 150
          
         # If there is a pending display, draw one of them 
-
         if game.game_over:
             cx, cy = board_center
             draw_winner_modal(screen, game, value_font, value_font, cx, cy)
 
+        # Show what chance card the player gets 
+        elif game.last_drawn_card:
+            p = game.pending_card["player"]
+            card = game.pending_card["card"]
+
+            # Always draw the card (humans + AIs get to read it)
+            display_card(screen, p, card, board_size, screen_height)
+
+            if is_ai_player(p):
+                # auto-execute after delay
+                if ai_card_started_at is None:
+                    ai_card_started_at = pygame.time.get_ticks()
+                elif elapsed(ai_card_started_at):
+                    pending = game.pending_card
+                    game.last_drawn_card = None
+                    game.pending_card = None
+                    ai_card_started_at = None
+
+                    if pending:
+                        c = pending["card"]; pl = pending["player"]
+                        c.execute(pl, game)
+                        if pending["type"] == "Chance":
+                            game.chance_cards.append(c)
+                        else:
+                            game.community_chest_cards.append(c)
+            else:
+                # Human: click to continue (mouse handler already enforces delay via ready(human_card_started_at))
+                if human_card_started_at is None:
+                    human_card_started_at = pygame.time.get_ticks()
+
+
         elif game.pending_purchase:
             draw_purchase_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
-        elif game.pending_rent: 
+            p = game.pending_purchase.get("player")
+            affordable = game.pending_purchase.get("affordable", True)
+            prop = game.pending_purchase.get("property")
+
+            if is_ai_player(p):
+                if ai_purchase_started_at is None:
+                    ai_purchase_started_at = pygame.time.get_ticks()
+                elif elapsed(ai_purchase_started_at):
+                    # Heuristic: buy if affordable AND keep a small buffer
+                    want_buy = bool(affordable and (p.money - getattr(prop, "cost", 0) >= 100))
+                    game.confirm_purchase(want_buy)
+                    ai_purchase_started_at = None
+            else:
+                if human_purchase_started_at is None:
+                    human_purchase_started_at = pygame.time.get_ticks()
+
+        elif game.pending_rent:
             draw_rent_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
+            p = game.pending_rent.get("player")
+            if p and is_ai_player(p):
+                if ai_rent_started_at is None:
+                    ai_rent_started_at = pygame.time.get_ticks()
+                elif elapsed(ai_rent_started_at):
+                    game.settle_rent()
+                    ai_rent_started_at = None
+            else:
+                if human_rent_started_at is None:
+                    human_rent_started_at = pygame.time.get_ticks()
 
         elif game.pending_build:
             draw_build_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
         elif game.pending_tax:
-            draw_tax_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
+            tp = game.pending_tax.get("player")
+            if tp and is_ai_player(tp):
+                if ai_tax_started_at is None:
+                    ai_tax_started_at = pygame.time.get_ticks()
+                elif elapsed(ai_tax_started_at):
+                    game.confirm_tax()
+                    ai_tax_started_at = None
+            else:
+                if human_tax_started_at is None:
+                    human_tax_started_at = pygame.time.get_ticks()
+                draw_tax_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
         
         elif game.pending_jail:
+            p = game.pending_jail.get("player")
             draw_jail_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
+            if p and is_ai_player(p):
+                if ai_jail_notice_started_at is None:
+                    ai_jail_notice_started_at = pygame.time.get_ticks()
+                elif elapsed(ai_jail_notice_started_at):
+                    p.in_jail = True
+                    p.position = game.board.jail_space_index
+                    p.jail_turns = 0
+                    game.pending_jail = None
+                    ai_jail_notice_started_at = None
+                    advance_to_next()
+            else:
+                if human_jail_notice_started_at is None:
+                    human_jail_notice_started_at = pygame.time.get_ticks()
+        
         elif game.pending_jail_turn:
+            p = game.pending_jail_turn.get("player")
             draw_jail_turn_choice_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
+            if p and is_ai_player(p):
+                if ai_jail_turn_started_at is None:
+                    ai_jail_turn_started_at = pygame.time.get_ticks()
+            else:
+                if human_jail_turn_started_at is None:
+                    human_jail_turn_started_at = pygame.time.get_ticks()
+        
         elif game.pending_debt:
             draw_debt_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
-        elif game.pending_bankrupt_notice:           
-            draw_bankrupt_notice(screen, game, value_font, text_font,
-                         board_center[0], board_center[1])
+        elif game.pending_bankrupt_notice:
+            draw_bankrupt_notice(screen, game, value_font, text_font, board_center[0], board_center[1])
+
+            # Start timers if needed
+            if ai_bankrupt_started_at is None:
+                ai_bankrupt_started_at = pygame.time.get_ticks()
+            if human_bankrupt_started_at is None:
+                human_bankrupt_started_at = pygame.time.get_ticks()
+
+            # AI auto-dismiss
+            if elapsed(ai_bankrupt_started_at):
+                game.pending_bankrupt_notice = None
+                ai_bankrupt_started_at = None
+            # Human: click handler already gates on ready(human_bankrupt_started_at)
 
         elif selected_space is not None:
             property_characteristic(screen, selected_space, board_size, screen_height)
@@ -690,10 +1059,12 @@ def running_display(player_names: list[str]):
     sys.exit()
 
 if __name__ == "__main__":
-    names_or_count = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
-    if isinstance(names_or_count, list):
-        player_names = names_or_count
-    else:
-        # fallback: old flow where only number was returned
-        player_names = [f"Player {i+1}" for i in range(int(names_or_count))]
-    running_display(player_names)
+    # names_or_count = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
+    # if isinstance(names_or_count, list):
+    #     player_names = names_or_count
+    # else:
+    #     # fallback: old flow where only number was returned
+    #     player_names = [f"Player {i+1}" for i in range(int(names_or_count))]
+    
+    player_names = ["AI 1", "AI 2"]
+    running_display(player_names, popup_delay_ms=0)

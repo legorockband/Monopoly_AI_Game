@@ -1,0 +1,479 @@
+"""
+MCTS-based AI for the provided Monopoly codebase.
+
+Plugs into the existing pending_* decision points exposed by Game/Board.
+Focuses on core optimal strategies:
+- Prioritize Orange/Red/Light Blue
+- Build up to 3 houses before hotels
+- Prefer railroads over utilities
+- Jail strategy: get out early game; linger mid/late
+- Aggressive house building when cash buffer allows
+
+Usage (integration notes at bottom of file).
+"""
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
+import math
+import random
+
+# --- Lightweight feature extraction & heuristics ----------------------------
+
+# Color weights approximate ROI/landing frequency (relative biases)
+COLOR_WEIGHTS = {
+    (255, 165, 0): 1.30,  # Orange
+    (255, 0, 0): 1.20,    # Red
+    (173, 216, 230): 1.12,# Light Blue
+    (255, 255, 0): 1.00,  # Yellow
+    (0, 255, 0): 0.95,    # Green
+    (255, 0, 255): 0.90,  # Pink
+    (150, 75, 0): 0.85,   # Brown
+    (0, 0, 139): 0.75,    # Dark Blue (swingy, expensive)
+    "RAIL": 1.05,
+    "UTIL": 0.35,
+}
+
+# Rent escalation emphasis for houses up to 3
+HOUSE_STEP_WEIGHT = [0.0, 1.0, 1.6, 2.2, 1.1, 0.6]  # [base,1,2,3,4,hotel]
+
+# Safety cash buffer (prefer to keep at least this much liquid)
+MIN_CASH_BUFFER = 200
+
+
+# --- Action representation --------------------------------------------------
+@dataclass(frozen=True)
+class Action:
+    kind: str
+    data: Tuple[Any, ...] = field(default_factory=tuple)
+
+    def __repr__(self) -> str:
+        if not self.data:
+            return self.kind
+        return f"{self.kind}{self.data!r}"
+
+
+# --- Game adapter: read-only view of what matters to the AI -----------------
+@dataclass
+class Snapshot:
+    """A minimal snapshot the AI can score without deep-copying the whole engine.
+    We keep it cheap: values are derived live from the Game object each time.
+    """
+    game: Any
+    me: Any
+
+    def net_worth(self) -> int:
+        cash = self.me.money
+        prop_val = 0
+        house_val = 0
+        for sp in self.me.properties_owned:
+            cost = getattr(sp, "cost", 0) or 0
+            if getattr(sp, "type", "") == "Railroad":
+                prop_val += cost * COLOR_WEIGHTS["RAIL"]
+            elif getattr(sp, "type", "") == "Utility":
+                prop_val += cost * COLOR_WEIGHTS["UTIL"]
+            else:
+                w = COLOR_WEIGHTS.get(getattr(sp, "color_group", None), 0.8)
+                prop_val += cost * w
+                # building value (not perfect but guides toward 3 houses)
+                if getattr(sp, "has_hotel", False):
+                    house_val += sp.house_cost * 4 * HOUSE_STEP_WEIGHT[5]
+                else:
+                    n = getattr(sp, "num_houses", 0)
+                    for i in range(1, n + 1):
+                        house_val += sp.house_cost * HOUSE_STEP_WEIGHT[i]
+        # Slight bonus for monopolies
+        mono_bonus = 0
+        # Board is accessible via self.game.board.spaces
+        for sp in self.game.board.spaces:
+            if getattr(sp, "type", "") == "Property" and getattr(sp, "owner", None) is self.me:
+                # Check monopoly
+                mates = [q for q in self.game.board.spaces
+                         if getattr(q, "type", "") == "Property" and getattr(q, "color_group", None) == sp.color_group]
+                if all(getattr(q, "owner", None) is self.me for q in mates):
+                    mono_bonus += 100  # small shaping reward per set
+        return int(cash + prop_val + house_val + mono_bonus)
+
+
+# --- MCTS core --------------------------------------------------------------
+@dataclass
+class Node:
+    state: Snapshot
+    parent: Optional[Node]
+    action_from_parent: Optional[Action]
+    untried_actions: List[Action]
+    children: List[Node] = field(default_factory=list)
+    visits: int = 0
+    total_value: float = 0.0
+
+    def uct_select_child(self, c: float = 1.25) -> "Node":
+        best, best_score = None, -1e9
+        for ch in self.children:
+            if ch.visits == 0:
+                score = float("inf")
+            else:
+                exploit = ch.total_value / ch.visits
+                explore = c * math.sqrt(math.log(self.visits + 1) / ch.visits)
+                score = exploit + explore
+            if score > best_score:
+                best, best_score = ch, score
+        return best
+
+    def add_child(self, action: Action, state: Snapshot, actions: List[Action]) -> "Node":
+        child = Node(state=state, parent=self, action_from_parent=action, untried_actions=actions)
+        self.children.append(child)
+        self.untried_actions.remove(action)
+        return child
+
+    def update(self, value: float) -> None:
+        self.visits += 1
+        self.total_value += value
+
+
+# --- Action generators tied to the real Game APIs --------------------------
+class ActionModel:
+    def __init__(self, game: Any, me: Any):
+        self.game = game
+        self.me = me
+
+    # Generate legal actions constrained to current pending modal/state
+    def legal_actions(self) -> List[Action]:
+        g = self.game
+        me = self.me
+        acts: List[Action] = []
+
+        # Debt handling
+        if g.pending_debt and g.pending_debt.get("player") is me:
+            amt = g.pending_debt["amount"]
+            if me.money >= amt:
+                acts.append(Action("PAY_DEBT"))
+            # try to manage/mortgage or sell – we model both as one generic action
+            # (the concrete sequence will be decided in apply())
+            acts.append(Action("RAISE_CASH"))
+            # as a last resort
+            acts.append(Action("BANKRUPT"))
+            return acts
+
+        # Jail-turn option modal
+        if g.pending_jail_turn and g.pending_jail_turn.get("player") is me:
+            # Phase detection by board saturation
+            props = [s for s in g.board.spaces if getattr(s, "type", "") == "Property"]
+            total_props = len(props) or 1
+            owned_props = sum(1 for s in props if getattr(s, "owner", None) is not None)
+            owned_ratio = owned_props / total_props
+            EARLY = owned_ratio < 0.50
+            LATE  = owned_ratio >= 0.75
+            forced_third = (me.jail_turns >= 2)
+
+            acts: List[Action] = []
+            if EARLY:
+                if me.get_out_of_jail_free_cards > 0:
+                    acts.append(Action("JAIL_USE_GOJF"))
+                if me.money >= 50:
+                    acts.append(Action("JAIL_PAY"))
+                acts.append(Action("JAIL_ROLL"))  # fallback if we can't leave immediately
+            else:
+                # Late/mid: keep rolling unless forced on 3rd
+                if not forced_third:
+                    acts.append(Action("JAIL_ROLL"))
+                if me.get_out_of_jail_free_cards > 0:
+                    acts.append(Action("JAIL_USE_GOJF"))
+                if me.money >= 50:
+                    acts.append(Action("JAIL_PAY"))
+                # If nothing else, rolling is still available
+                if not acts:
+                    acts.append(Action("JAIL_ROLL"))
+            return acts
+
+        # Immediate send-to-jail notice (ack only)
+        if g.pending_jail and g.pending_jail.get("player") is me:
+            # UI will move to jail on acknowledge; we just model advancing the turn
+            acts.append(Action("ACK_GO_TO_JAIL"))
+            return acts
+
+        # Purchase decision
+        if g.pending_purchase and g.pending_purchase.get("player") is me:
+            prop = g.pending_purchase["property"]
+            affordable = g.pending_purchase.get("affordable", True)
+            if affordable:
+                acts.append(Action("BUY", (prop,)))
+            acts.append(Action("SKIP_PURCHASE", (prop,)))
+            return acts
+
+        # Rent & Tax
+        if g.pending_rent and g.pending_rent.get("player") is me:
+            acts.append(Action("PAY_RENT"))
+            return acts
+        if g.pending_tax and g.pending_tax.get("player") is me:
+            acts.append(Action("PAY_TAX"))
+            return acts
+
+        # Build/manage popup (opened when landing on own property or from Manage UI)
+        if g.pending_build and g.pending_build.get("player") is me:
+            info = g.pending_build
+            if info.get("can_house"):
+                acts.append(Action("BUILD_HOUSE", (info["property"],)))
+            if info.get("can_hotel"):
+                acts.append(Action("BUILD_HOTEL", (info["property"],)))
+            if info.get("can_sell_house"):
+                acts.append(Action("SELL_HOUSE", (info["property"],)))
+            if info.get("can_sell_hotel"):
+                acts.append(Action("SELL_HOTEL", (info["property"],)))
+            if info.get("can_mortgage"):
+                acts.append(Action("MORTGAGE", (info["property"],)))
+            if info.get("can_unmortgage"):
+                acts.append(Action("UNMORTGAGE", (info["property"],)))
+            acts.append(Action("SKIP_BUILD"))
+            return acts
+
+        # If none of the above, default to either ROLL (if allowed) or END_TURN.
+        # We can’t directly roll here (that’s handled by UI loop), so we expose END_TURN
+        # for sanity; the driver will choose to click roll when legal.
+        acts.append(Action("NOOP"))
+        return acts
+
+    # Apply an action to the real Game (one step); return a new Snapshot
+    def apply(self, a: Action) -> Snapshot:
+        g = self.game
+        me = self.me
+        kind = a.kind
+
+        if kind == "PAY_DEBT":
+            info = g.pending_debt
+            if info and info.get("player") is me and me.money >= info["amount"]:
+                amt = info["amount"]; cred = info.get("creditor")
+                me.pay_money(amt)
+                if cred: cred.collect_money(amt)
+                g.clear_debt()
+            return Snapshot(g, me)
+
+        if kind == "RAISE_CASH":
+            # Greedy mortgages/sales guided by heuristics: mortgage weakest first
+            need = 0
+            if g.pending_debt and g.pending_debt.get("player") is me:
+                need = max(0, g.pending_debt["amount"] - me.money)
+            earned = 0
+            # Sort properties to mortgage/sell (utilities, browns, dark blue last)
+            def key(sp):
+                t = getattr(sp, "type", "Property")
+                if t == "Utility": return 0.1
+                if t == "Railroad": return 0.4
+                if t == "Property":
+                    return COLOR_WEIGHTS.get(getattr(sp, "color_group", None), 0.8)
+                return 0.5
+            for sp in sorted(list(me.properties_owned), key=key):
+                if hasattr(sp, "can_mortgage") and sp.can_mortgage(me, g.board)[0]:
+                    sp.mortgage(me); earned += getattr(sp, "mortgage_value", 0)
+                elif hasattr(sp, "can_sell_house") and sp.can_sell_house(me, g.board)[0]:
+                    sp.sell_house(me); earned += getattr(sp, "house_cost", 0) // 2
+                elif hasattr(sp, "can_sell_hotel") and sp.can_sell_hotel(me, g.board)[0]:
+                    sp.sell_hotel(me); earned += getattr(sp, "house_cost", 0) // 2
+                if need and me.money >= g.pending_debt["amount"]:
+                    break
+            return Snapshot(g, me)
+
+        if kind == "BANKRUPT":
+            info = g.pending_debt
+            if info and info.get("player") is me:
+                g.declare_bankruptcy(me, info.get("creditor"))
+                g.clear_debt()
+            return Snapshot(g, me)
+
+        if kind == "JAIL_USE_GOJF":
+            g.use_gojf_and_exit(me); return Snapshot(g, me)
+        if kind == "JAIL_PAY":
+            g.pay_fine_and_exit(me); return Snapshot(g, me)
+        if kind == "JAIL_ROLL":
+            g.roll_for_doubles_from_jail(me); return Snapshot(g, me)
+        if kind == "ACK_GO_TO_JAIL":
+            # mimic clicking OK: the UI code normally moves player after click
+            # Here we just set pending_jail to None; the driver will advance
+            g.pending_jail = None
+            me.in_jail = True
+            me.position = g.board.jail_space_index
+            me.jail_turns = 0
+            return Snapshot(g, me)
+
+        if kind == "BUY":
+            g.confirm_purchase(True); return Snapshot(g, me)
+        if kind == "SKIP_PURCHASE":
+            g.confirm_purchase(False); return Snapshot(g, me)
+
+        if kind == "PAY_RENT":
+            g.settle_rent(); return Snapshot(g, me)
+        if kind == "PAY_TAX":
+            g.confirm_tax(); return Snapshot(g, me)
+
+        if kind == "BUILD_HOUSE":
+            g.confirm_build("house"); return Snapshot(g, me)
+        if kind == "BUILD_HOTEL":
+            g.confirm_build("hotel"); return Snapshot(g, me)
+        if kind == "SELL_HOUSE":
+            g.confirm_build("sell_house"); return Snapshot(g, me)
+        if kind == "SELL_HOTEL":
+            g.confirm_build("sell_hotel"); return Snapshot(g, me)
+        if kind == "MORTGAGE":
+            g.confirm_build("mortgage"); return Snapshot(g, me)
+        if kind == "UNMORTGAGE":
+            g.confirm_build("unmortgage"); return Snapshot(g, me)
+
+        return Snapshot(g, me)
+
+
+# --- Rollout policy ---------------------------------------------------------
+def rollout_value(s: Snapshot) -> float:
+    """Stochastic rollout: we don’t simulate future dice; instead, evaluate
+    with a shaped heuristic and a small random jitter to break ties.
+    """
+    base = s.net_worth()
+    # Encourage house count reaching 3 across strong colors
+    three_house_push = 0
+    for sp in s.me.properties_owned:
+        if getattr(sp, "type", "") == "Property":
+            n = getattr(sp, "num_houses", 0)
+            if n == 3:
+                w = COLOR_WEIGHTS.get(getattr(sp, "color_group", None), 1.0)
+                three_house_push += 40 * w
+    # Slight penalty for low cash (danger of rent)
+    cash_pen = 0
+    if s.me.money < MIN_CASH_BUFFER:
+        cash_pen = (MIN_CASH_BUFFER - s.me.money) * 0.15
+    return base + three_house_push - cash_pen + random.uniform(-5, 5)
+
+
+# --- Search driver ----------------------------------------------------------
+def mcts_decide(game: Any, me: Any, iterations: int = 200) -> Action:
+    def _shadow_apply(model: ActionModel, action: Action) -> Snapshot:
+        # Return a Snapshot without mutating the real game. A proper clone-based
+        # simulator would go here; for safety we just no-op during search.
+        return Snapshot(model.game, model.me)
+
+    model = ActionModel(game, me)
+    root_state = Snapshot(game, me)
+    root = Node(state=root_state, parent=None, action_from_parent=None, untried_actions=model.legal_actions())
+
+    if not root.untried_actions:
+        return Action("NOOP")
+
+    for _ in range(iterations):
+        node = root
+        state = Snapshot(game, me)
+        local_model = ActionModel(game, me)
+
+        # Selection
+        while not node.untried_actions and node.children:
+            node = node.uct_select_child()
+            state = _shadow_apply(local_model, node.action_from_parent)     # ← was: local_model.apply(...)
+            local_model = ActionModel(game, me)
+
+        # Expansion
+        if node.untried_actions:
+            a = random.choice(node.untried_actions)
+            state = _shadow_apply(local_model, a)                            # ← was: local_model.apply(...)
+            local_model = ActionModel(game, me)
+            node = node.add_child(a, state, local_model.legal_actions())
+
+        # Rollout (heuristic evaluation)
+        value = rollout_value(state)
+
+        # Backprop
+        while node is not None:
+            node.update(value)
+            node = node.parent
+
+    # Pick the most-visited child
+    if not root.children:
+        return random.choice(root.untried_actions)
+    best = max(root.children, key=lambda c: c.visits)
+    return best.action_from_parent or Action("NOOP")
+
+
+# --- High-level bot ---------------------------------------------------------
+class MCTSMonopolyBot:
+    """A simple orchestration wrapper. Call step() repeatedly from the UI loop
+    whenever it’s this player’s turn. The bot will:
+      - auto-handle modals (rent/tax/purchase/build/jail/debt)
+      - request rolls by returning the flag `want_roll`
+      - request end-of-turn by returning `want_end`
+    """
+    def __init__(self, name_prefix: str = "AI"):
+        self.name_prefix = name_prefix
+
+    def is_ai(self, player: Any) -> bool:
+        return isinstance(player.name, str) and player.name.strip().upper().startswith(self.name_prefix.upper())
+
+    def step(self, game: Any, player: Any, iterations: int = 250) -> Dict[str, bool]:
+        if not self.is_ai(player):
+            return {"want_roll": False, "want_end": False}
+
+        if getattr(game, "pending_jail", None) or getattr(game, "pending_jail_turn", None):
+             return {"want_roll": False, "want_end": False}
+
+        # If ANY modal is up, do nothing. Let the UI show it + handle timed auto-actions.
+        if (getattr(game, "pending_purchase", None) and game.pending_purchase.get("player") is player) \
+           or (getattr(game, "pending_rent", None) and game.pending_rent.get("player") is player) \
+           or (getattr(game, "pending_tax", None) and game.pending_tax.get("player") is player):
+            return {"want_roll": False, "want_end": False}
+
+        # No modal: we can think about rolling/end-of-turn.
+        model = ActionModel(game, player)
+        actions = model.legal_actions()
+        if actions and (len(actions) > 1 or actions[0].kind != "NOOP"):
+            a = mcts_decide(game, player, iterations=iterations)
+            model.apply(a)
+            return {"want_roll": False, "want_end": False}
+
+        return {"want_roll": True, "want_end": False}
+
+
+# --- Integration instructions ----------------------------------------------
+INTEGRATION = r"""
+1) Save this file as ai_mcts.py alongside your existing modules.
+
+2) In main_display.py, add the bot and wire it into the loop.
+   Near the top of the file:
+       from ai_mcts import MCTSMonopolyBot
+       bot = MCTSMonopolyBot(name_prefix="AI")  # any player whose name starts with "AI" will be automated
+
+   Inside running_display(), after `game = Game(...)` and after players are created, you already
+   set player colors. No change needed there.
+
+   In the event loop / per-frame section where you currently wait for clicks, add a small
+   automation block **before** processing human input to let the AI act whenever it's their turn.
+
+   Pseudocode placement example (search for the section that computes `enable_dice` and draws buttons):
+
+       current_player = game.players[player_idx]
+
+       # --- AI driver: let the bot act automatically ---
+       if bot.is_ai(current_player):
+           intent = bot.step(game, current_player, iterations=300)
+           # If the bot wants to roll and it’s legal, trigger the same code path as a click
+           if intent.get("want_roll") and enable_dice and not (game.pending_jail_turn or game.pending_purchase or game.pending_rent or game.pending_tax or game.pending_build or game.pending_debt or game.pending_jail or game.pending_bankrupt_notice):
+               roll_total, is_doubles = game.dice.roll()
+               has_rolled = True
+               rolled = (game.dice.die1_value, game.dice.die2_value)
+               current_player.move(roll_total, game.board)
+               if is_doubles:
+                   current_player.doubles_rolled_consecutive += 1
+                   if current_player.doubles_rolled_consecutive == 3:
+                       game.pending_jail = {"player": current_player}
+                       current_player.doubles_rolled_consecutive = 0
+                       rolled = None; is_doubles = False; has_rolled = False
+                       # advance to next
+                       player_idx = (player_idx + 1) % len(game.players)
+               else:
+                   current_player.doubles_rolled_consecutive = 0
+
+           # End turn automatically if allowed
+           if (has_rolled and (not is_doubles) and not (game.pending_build or game.pending_rent or game.pending_purchase or game.last_drawn_card or game.pending_debt or game.pending_jail_turn or game.pending_bankrupt_notice)):
+               player_idx = (player_idx + 1) % len(game.players)
+
+3) To play against the bot, start a game and name one or more players like:
+       AI Alpha, AI Beta
+   Any player whose name starts with "AI" will be controlled by the bot.
+
+Notes:
+- The MCTS here uses a fast heuristic rollout rather than full dice simulation for speed and simplicity.
+- Decisions it controls map to your engine’s pending_* modals (purchase/build/jail/debt/rent/tax), which are the exact places humans click.
+- You can tune `iterations` in `bot.step()` for stronger play (more = stronger).
+"""

@@ -11,6 +11,7 @@ class Player:
         self.jail_turns = 0
         self.get_out_of_jail_free_cards = 0
         self.doubles_rolled_consecutive = 0 
+        # self.is_ai = False
 
     def move(self, spaces_to_move: int, board):
         old_position = self.position
@@ -256,7 +257,7 @@ class Property(Space):
         if self.owner != owner: return (False, "Not owner")
         if self.is_mortgaged: return (False, "Mortgaged")
         if self.has_hotel: return (False, "Already a hotel")
-        if getattr(board.game, "houses_remaing", 0) <= 0: return (False, "No Houses Left")
+        if getattr(board.game, "houses_remaining", 0) <= 0: return (False, "No Houses Left")
         if not owner.has_monopoly(self.color_group, board):
             return(False, "Need monpoly")
     
@@ -286,7 +287,7 @@ class Property(Space):
             return (False, "Need 4 houses here first")
         if owner.money < self.house_cost:
             return (False, "Not enough cash")
-        if getattr(board.game, "hotels_remaing", 0) <= 0: return (False, "No Hotels Left")
+        if getattr(board.game, "hotels_remaining", 0) <= 0: return (False, "No Hotels Left")
 
         return (True, "")
 
@@ -338,8 +339,8 @@ class Property(Space):
     # bank pays half the hotel price - hotel price equal the house price of color set
     def sell_hotel(self, owner):
         owner.collect_money(self.house_cost // 2)
-        owner.board.game.houses_remaing -= 4
-        owner.board.game.hotel_remaing += 1
+        owner.board.game.houses_remaining -= 4
+        owner.board.game.hotels_remaining += 1
         self.has_hotel = False
         self.num_houses = 4
         print(f"{owner.name} sold a HOTEL on {self.name} (now 4 houses).")
@@ -806,6 +807,13 @@ class Game:
         if debtor in self.players:
             self.players.remove(debtor)
 
+        else:
+            # Fallback: remove a player that matches by name (helps in simulated states)
+            for p in list(self.players):
+                if getattr(p, "name", None) == getattr(debtor, "name", None):
+                    self.players.remove(p)
+                    break
+
         # Show a one-click notice for the UI to acknowledge
         self.pending_bankrupt_notice = {
             "debtor": debtor.name,
@@ -1078,7 +1086,7 @@ class Game:
                 player.move(roll_sum, self.board)
             else:
                 print(f"  {player.name} cannot pay $50 and is bankrupt! Game Over for {player.name}.")
-                self.players.remove(player) # Remove bankrupt player
+                self.declare_bankruptcy(player, creditor=None)
                 if len(self.players) == 1:
                     self.game_over = True
                     print(f"\n--- Game Over! {self.players[0].name} is the winner! ---")
@@ -1134,10 +1142,10 @@ class Game:
                 player.move(roll_sum, self.board)
             else:
                 print(f"  {player.name} cannot pay $50 and is bankrupt! Game Over for {player.name}.")
-                self.players.remove(player)
-                if len(self.players) == 1:
-                    self.game_over = True
-                    print(f"\n--- Game Over! {self.players[0].name} is the winner! ---")
+                self.declare_bankruptcy(player, creditor=None)
+                # if len(self.players) == 1:
+                #     self.game_over = True
+                #     print(f"\n--- Game Over! {self.players[0].name} is the winner! ---")
         else:
             print(f"  {player.name} could not roll doubles and remains in Jail.")
         self.pending_jail_turn = None
