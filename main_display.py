@@ -1435,13 +1435,11 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
 
 
 if __name__ == "__main__":
-    # names_or_count = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
-    # if isinstance(names_or_count, list):
-    #     player_names = names_or_count
-    # else:
-    #     # fallback: old flow where only number was returned
-    #     player_names = [f"Player {i+1}" for i in range(int(names_or_count))]
+    names_or_count = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
+    if isinstance(names_or_count, list):
+        player_names = names_or_count
+    else:
+        # fallback: old flow where only number was returned
+        player_names = [f"Player {i+1}" for i in range(int(names_or_count))]
 
-    # player_names = ["AI 1", "Troy", "Thomas", "Tenzin"]
-    player_names = ["AI 1", "AI 2", "AI 3", "AI 4"]
-    running_display(player_names, popup_delay_ms=0)
+    running_display(player_names, popup_delay_ms=1000)
