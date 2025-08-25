@@ -1,0 +1,301 @@
+seed,mode,turns,winner,seat
+0,vs_proxies,10,BuyAll,1
+1,vs_proxies,10,Cautious,1
+2,vs_proxies,10,AI 1,2
+3,vs_proxies,10,Greedy,0
+4,vs_proxies,10,AI 1,0
+5,vs_proxies,10,Greedy,2
+6,vs_proxies,10,AI 1,2
+7,vs_proxies,10,AI 1,1
+8,vs_proxies,10,BuyAll,1
+9,vs_proxies,10,Greedy,2
+10,vs_proxies,10,Cautious,0
+11,vs_proxies,10,Cautious,3
+12,vs_proxies,10,Cautious,2
+13,vs_proxies,10,Cautious,1
+14,vs_proxies,10,Greedy,1
+15,vs_proxies,10,AI 1,1
+16,vs_proxies,10,BuyAll,1
+17,vs_proxies,10,BuyAll,0
+18,vs_proxies,10,Cautious,0
+19,vs_proxies,10,AI 1,1
+20,vs_proxies,10,AI 1,0
+21,vs_proxies,10,BuyAll,0
+22,vs_proxies,10,Cautious,0
+23,vs_proxies,10,AI 1,1
+24,vs_proxies,10,BuyAll,1
+25,vs_proxies,10,Cautious,1
+26,vs_proxies,10,Cautious,0
+27,vs_proxies,10,BuyAll,2
+28,vs_proxies,10,Greedy,3
+29,vs_proxies,10,AI 1,3
+30,vs_proxies,10,BuyAll,3
+31,vs_proxies,10,Greedy,0
+32,vs_proxies,10,Cautious,2
+33,vs_proxies,10,Cautious,1
+34,vs_proxies,10,BuyAll,3
+35,vs_proxies,10,Greedy,0
+36,vs_proxies,10,BuyAll,1
+37,vs_proxies,10,BuyAll,0
+38,vs_proxies,10,AI 1,2
+39,vs_proxies,10,Greedy,0
+40,vs_proxies,10,AI 1,0
+41,vs_proxies,10,Greedy,2
+42,vs_proxies,10,Greedy,1
+43,vs_proxies,10,AI 1,1
+44,vs_proxies,10,AI 1,0
+45,vs_proxies,10,Cautious,1
+46,vs_proxies,10,BuyAll,3
+47,vs_proxies,10,AI 1,1
+48,vs_proxies,10,AI 1,0
+49,vs_proxies,10,BuyAll,0
+50,vs_proxies,10,Greedy,1
+51,vs_proxies,10,Cautious,3
+52,vs_proxies,10,AI 1,0
+53,vs_proxies,10,AI 1,3
+54,vs_proxies,10,Cautious,0
+55,vs_proxies,10,AI 1,1
+56,vs_proxies,10,Greedy,3
+57,vs_proxies,10,BuyAll,0
+58,vs_proxies,10,Greedy,1
+59,vs_proxies,10,Greedy,0
+60,vs_proxies,10,Greedy,3
+61,vs_proxies,10,Cautious,1
+62,vs_proxies,10,Cautious,0
+63,vs_proxies,10,Greedy,0
+64,vs_proxies,10,Cautious,2
+65,vs_proxies,10,BuyAll,0
+66,vs_proxies,10,Greedy,1
+67,vs_proxies,10,Greedy,0
+68,vs_proxies,10,BuyAll,1
+69,vs_proxies,10,Greedy,2
+70,vs_proxies,10,AI 1,2
+71,vs_proxies,10,BuyAll,2
+72,vs_proxies,10,BuyAll,1
+73,vs_proxies,10,BuyAll,0
+74,vs_proxies,10,BuyAll,3
+75,vs_proxies,10,BuyAll,2
+76,vs_proxies,10,Cautious,2
+77,vs_proxies,10,Cautious,1
+78,vs_proxies,10,AI 1,2
+79,vs_proxies,10,Greedy,0
+80,vs_proxies,10,AI 1,0
+81,vs_proxies,10,Cautious,1
+82,vs_proxies,10,Cautious,0
+83,vs_proxies,10,Greedy,0
+84,vs_proxies,10,BuyAll,1
+85,vs_proxies,10,BuyAll,0
+86,vs_proxies,10,AI 1,2
+87,vs_proxies,10,Greedy,0
+88,vs_proxies,10,Greedy,3
+89,vs_proxies,10,Greedy,2
+90,vs_proxies,10,Cautious,0
+91,vs_proxies,10,Cautious,3
+92,vs_proxies,10,Greedy,3
+93,vs_proxies,10,Cautious,1
+94,vs_proxies,10,AI 1,2
+95,vs_proxies,10,Cautious,3
+96,vs_proxies,10,AI 1,0
+97,vs_proxies,10,AI 1,3
+98,vs_proxies,10,AI 1,2
+99,vs_proxies,10,BuyAll,2
+100,vs_proxies,10,AI 1,0
+101,vs_proxies,10,BuyAll,0
+102,vs_proxies,10,Cautious,0
+103,vs_proxies,10,Cautious,3
+104,vs_proxies,10,AI 1,0
+105,vs_proxies,10,AI 1,3
+106,vs_proxies,10,AI 1,2
+107,vs_proxies,10,BuyAll,2
+108,vs_proxies,10,AI 1,0
+109,vs_proxies,10,BuyAll,0
+110,vs_proxies,10,BuyAll,3
+111,vs_proxies,10,AI 1,1
+112,vs_proxies,10,AI 1,0
+113,vs_proxies,10,Greedy,2
+114,vs_proxies,10,BuyAll,3
+115,vs_proxies,10,Greedy,0
+116,vs_proxies,10,Greedy,3
+117,vs_proxies,10,BuyAll,0
+118,vs_proxies,10,Greedy,1
+119,vs_proxies,10,AI 1,1
+120,vs_proxies,10,Cautious,2
+121,vs_proxies,10,Cautious,1
+122,vs_proxies,10,Greedy,1
+123,vs_proxies,10,Cautious,3
+124,vs_proxies,10,BuyAll,1
+125,vs_proxies,10,Greedy,2
+126,vs_proxies,10,Cautious,0
+127,vs_proxies,10,BuyAll,2
+128,vs_proxies,10,Cautious,2
+129,vs_proxies,10,AI 1,3
+130,vs_proxies,10,Greedy,1
+131,vs_proxies,10,AI 1,1
+132,vs_proxies,10,Cautious,2
+133,vs_proxies,10,Cautious,1
+134,vs_proxies,10,Cautious,0
+135,vs_proxies,10,Cautious,3
+136,vs_proxies,10,AI 1,0
+137,vs_proxies,10,Cautious,1
+138,vs_proxies,10,AI 1,2
+139,vs_proxies,10,AI 1,1
+140,vs_proxies,10,AI 1,0
+141,vs_proxies,10,AI 1,3
+142,vs_proxies,10,AI 1,2
+143,vs_proxies,10,Greedy,0
+144,vs_proxies,10,AI 1,0
+145,vs_proxies,10,BuyAll,0
+146,vs_proxies,10,Cautious,0
+147,vs_proxies,10,BuyAll,2
+148,vs_proxies,10,Cautious,2
+149,vs_proxies,10,BuyAll,0
+150,vs_proxies,10,Cautious,0
+151,vs_proxies,10,Greedy,0
+152,vs_proxies,10,AI 1,0
+153,vs_proxies,10,AI 1,3
+154,vs_proxies,10,Greedy,1
+155,vs_proxies,10,BuyAll,2
+156,vs_proxies,10,Cautious,2
+157,vs_proxies,10,Greedy,2
+158,vs_proxies,10,Greedy,1
+159,vs_proxies,10,BuyAll,2
+160,vs_proxies,10,AI 1,0
+161,vs_proxies,10,BuyAll,0
+162,vs_proxies,10,BuyAll,3
+163,vs_proxies,10,BuyAll,2
+164,vs_proxies,10,Greedy,3
+165,vs_proxies,10,Cautious,1
+166,vs_proxies,10,Greedy,1
+167,vs_proxies,10,AI 1,1
+168,vs_proxies,10,BuyAll,1
+169,vs_proxies,10,Cautious,1
+170,vs_proxies,10,Cautious,0
+171,vs_proxies,10,BuyAll,2
+172,vs_proxies,10,AI 1,0
+173,vs_proxies,10,Cautious,1
+174,vs_proxies,10,Greedy,1
+175,vs_proxies,10,Greedy,0
+176,vs_proxies,10,BuyAll,1
+177,vs_proxies,10,BuyAll,0
+178,vs_proxies,10,Cautious,0
+179,vs_proxies,10,Greedy,0
+180,vs_proxies,10,BuyAll,1
+181,vs_proxies,10,Cautious,1
+182,vs_proxies,10,Greedy,1
+183,vs_proxies,10,Greedy,0
+184,vs_proxies,10,Cautious,2
+185,vs_proxies,10,BuyAll,0
+186,vs_proxies,10,BuyAll,3
+187,vs_proxies,10,Cautious,3
+188,vs_proxies,10,BuyAll,1
+189,vs_proxies,10,Cautious,1
+190,vs_proxies,10,Greedy,1
+191,vs_proxies,10,Cautious,3
+192,vs_proxies,10,Cautious,2
+193,vs_proxies,10,Cautious,1
+194,vs_proxies,10,AI 1,2
+195,vs_proxies,10,BuyAll,2
+196,vs_proxies,10,BuyAll,1
+197,vs_proxies,10,BuyAll,0
+198,vs_proxies,10,Cautious,0
+199,vs_proxies,10,Greedy,0
+200,vs_proxies,10,AI 1,0
+201,vs_proxies,10,BuyAll,0
+202,vs_proxies,10,Cautious,0
+203,vs_proxies,10,Cautious,3
+204,vs_proxies,10,Cautious,2
+205,vs_proxies,10,BuyAll,0
+206,vs_proxies,10,Cautious,0
+207,vs_proxies,10,Cautious,3
+208,vs_proxies,10,AI 1,0
+209,vs_proxies,10,BuyAll,0
+210,vs_proxies,10,Greedy,1
+211,vs_proxies,10,Cautious,3
+212,vs_proxies,10,Greedy,3
+213,vs_proxies,10,BuyAll,0
+214,vs_proxies,10,Greedy,1
+215,vs_proxies,10,Greedy,0
+216,vs_proxies,10,AI 1,0
+217,vs_proxies,10,Cautious,1
+218,vs_proxies,10,Cautious,0
+219,vs_proxies,10,AI 1,1
+220,vs_proxies,10,Cautious,2
+221,vs_proxies,10,Cautious,1
+222,vs_proxies,10,AI 1,2
+223,vs_proxies,10,Greedy,0
+224,vs_proxies,10,AI 1,0
+225,vs_proxies,10,BuyAll,0
+226,vs_proxies,10,Cautious,0
+227,vs_proxies,10,Greedy,0
+228,vs_proxies,10,BuyAll,1
+229,vs_proxies,10,BuyAll,0
+230,vs_proxies,10,AI 1,2
+231,vs_proxies,10,BuyAll,2
+232,vs_proxies,10,BuyAll,1
+233,vs_proxies,10,BuyAll,0
+234,vs_proxies,10,AI 1,2
+235,vs_proxies,10,Greedy,0
+236,vs_proxies,10,AI 1,0
+237,vs_proxies,10,BuyAll,0
+238,vs_proxies,10,Greedy,1
+239,vs_proxies,10,AI 1,1
+240,vs_proxies,10,Greedy,3
+241,vs_proxies,10,Cautious,1
+242,vs_proxies,10,Cautious,0
+243,vs_proxies,10,Greedy,0
+244,vs_proxies,10,AI 1,0
+245,vs_proxies,10,Greedy,2
+246,vs_proxies,10,BuyAll,3
+247,vs_proxies,10,Greedy,0
+248,vs_proxies,10,AI 1,0
+249,vs_proxies,10,Cautious,1
+250,vs_proxies,10,Cautious,0
+251,vs_proxies,10,Greedy,0
+252,vs_proxies,10,AI 1,0
+253,vs_proxies,10,AI 1,3
+254,vs_proxies,10,Greedy,1
+255,vs_proxies,10,Cautious,3
+256,vs_proxies,10,BuyAll,1
+257,vs_proxies,10,Cautious,1
+258,vs_proxies,10,Cautious,0
+259,vs_proxies,10,BuyAll,2
+260,vs_proxies,10,BuyAll,1
+261,vs_proxies,10,Cautious,1
+262,vs_proxies,10,Greedy,1
+263,vs_proxies,10,Greedy,0
+264,vs_proxies,10,Greedy,3
+265,vs_proxies,10,Cautious,1
+266,vs_proxies,10,BuyAll,3
+267,vs_proxies,10,Greedy,0
+268,vs_proxies,10,Cautious,2
+269,vs_proxies,10,Cautious,1
+270,vs_proxies,10,BuyAll,3
+271,vs_proxies,10,AI 1,1
+272,vs_proxies,10,Greedy,3
+273,vs_proxies,10,Greedy,2
+274,vs_proxies,10,Greedy,1
+275,vs_proxies,10,AI 1,1
+276,vs_proxies,10,AI 1,0
+277,vs_proxies,10,Greedy,2
+278,vs_proxies,10,Greedy,1
+279,vs_proxies,10,Greedy,0
+280,vs_proxies,10,AI 1,0
+281,vs_proxies,10,BuyAll,0
+282,vs_proxies,10,Greedy,1
+283,vs_proxies,10,Greedy,0
+284,vs_proxies,10,AI 1,0
+285,vs_proxies,10,Cautious,1
+286,vs_proxies,10,Cautious,0
+287,vs_proxies,10,Greedy,0
+288,vs_proxies,10,AI 1,0
+289,vs_proxies,10,Cautious,1
+290,vs_proxies,10,Cautious,0
+291,vs_proxies,10,BuyAll,2
+292,vs_proxies,10,Cautious,2
+293,vs_proxies,10,BuyAll,0
+294,vs_proxies,10,Cautious,0
+295,vs_proxies,10,Cautious,3
+296,vs_proxies,10,AI 1,0
+297,vs_proxies,10,Greedy,2
+298,vs_proxies,10,Greedy,1
+299,vs_proxies,10,Cautious,3

@@ -1,4 +1,4 @@
-Aggregate of all input CSVs:
+File: C:\Users\pokem\OneDrive\Desktop\Monopoly_AI_Game\CSV_Files\vs_proxies_500.csv
 n_rows:
 500
 

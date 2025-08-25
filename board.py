@@ -13,6 +13,10 @@ def _trade_prop_text_color(space):
         return getattr(space, "color_group", (0,0,0))
     return (30, 30, 30)
 
+def _current_player(game):
+    return game.players[game.current_player_index] if game.players else None
+
+
 spaces_names = [
     "MEDITERRANEAN AVENUE", "COMMUNITY CHEST", "BALTIC AVENUE", "INCOME TAX", "READING RAILROAD", "ORIENTAL AVENUE", "CHANCE", "VERTMONT AVENUE", "CONNETICUT AVENUE", 
     "ST. CHARLES PLACE","ELECTRIC COMPANY", "STATES AVENUE", "VIRGINIA AVENUE", "PENNSYLVANIA RAILROAD", "ST. JAMES PLACE", "COMMUNITY CHEST", "TENNESSEE AVENUE", "NEW YORK AVENUE", 
@@ -647,9 +651,28 @@ def draw_tax_modal(screen:pygame.Surface, game, title_font, body_font, cx, cy):
     return pay_rect
 
 def draw_jail_modal(screen, game, title_font, body_font, cx, cy):
-    info = game.pending_jail
-    if not info: 
+    # Resolve the right pending-jail item for the *current* player
+    info = None
+    pj = getattr(game, "pending_jail", None)
+    if isinstance(pj, dict):
+        info = pj
+    elif isinstance(pj, list):
+        cur = None
+        try:
+            cur = game.players[game.current_player_index]
+        except Exception:
+            cur = None
+        if cur:
+            for j in pj:
+                if j.get("player") is cur:
+                    info = j
+                    break
+        if info is None and pj:
+            info = pj[0]  # fallback (shouldn't normally be needed)
+
+    if not info:
         return None
+
     p = info["player"]
 
     w,h = 360, 180
@@ -754,11 +777,11 @@ def draw_manage_select_modal(screen, player, board, cx, cy):
 
     return btns, cancel_rect
 
-def draw_trade_select_modal(screen, players, selected_idxs, cx, cy):
+def draw_trade_select_modal(screen, players, selected_idxs, cx, cy, initiator_idx=None):
     """
-    Modal: choose exactly two players.
-    selected_idxs: set[int] (mutated by caller based on clicks)
-    Returns (player_btn_rects:list[Rect], confirm_rect:Rect, cancel_rect:Rect)
+    Modal: choose ONE other player to trade with.
+    - Grey out the initiator (they can't select themselves).
+    - Confirm button turns green once exactly one other player is selected.
     """
     title_font = pygame.font.SysFont("Arial", 24, bold=True)
     body_font  = pygame.font.SysFont(None, 22)
@@ -768,7 +791,7 @@ def draw_trade_select_modal(screen, players, selected_idxs, cx, cy):
     pygame.draw.rect(screen, (255,255,224), (x,y,w,h))
     pygame.draw.rect(screen, (0,0,0), (x,y,w,h), 2)
 
-    t = title_font.render("Choose 2 Players to Trade", True, (0,0,0))
+    t = title_font.render("Choose a Player to Trade With", True, (0,0,0))
     screen.blit(t, (x + (w - t.get_width())//2, y + 12))
 
     btn_rects = []
@@ -783,15 +806,22 @@ def draw_trade_select_modal(screen, players, selected_idxs, cx, cy):
         rx = bx + col*(bw + gap_x)
         ry = by + row*(bh + gap_y)
         r = pygame.Rect(rx, ry, bw, bh)
-        active = (i in selected_idxs)
-        fill = (0,180,120) if active else (220,220,220)
+
+        if i == initiator_idx:
+            # Greyed out for the current player
+            fill = (50,50,50)
+        else:
+            active = (i in selected_idxs)
+            fill = (0,180,120) if active else (220,220,220)
+
         pygame.draw.rect(screen, fill, r, border_radius=10)
         pygame.draw.rect(screen, (0,0,0), r, 2, border_radius=10)
         name = body_font.render(p.name, True, getattr(p, "color", (0,0,0)))
         screen.blit(name, (r.centerx - name.get_width()//2, r.centery - name.get_height()//2))
         btn_rects.append(r)
 
-    confirm_enabled = (len(selected_idxs) == 2)
+    # ✅ Confirm enabled when exactly 1 non-initiator is selected
+    confirm_enabled = (len(selected_idxs) == 1)
     confirm_rect = pygame.Rect(x + w - 140 - 20, y + h - 50 - 16, 140, 50)
     cancel_rect  = pygame.Rect(x + 20, y + h - 50 - 16, 140, 50)
 
@@ -801,6 +831,7 @@ def draw_trade_select_modal(screen, players, selected_idxs, cx, cy):
     c2 = body_font.render("CANCEL",  True, (255,255,255))
     screen.blit(c1, (confirm_rect.centerx - c1.get_width()//2, confirm_rect.centery - c1.get_height()//2))
     screen.blit(c2, (cancel_rect.centerx  - c2.get_width()//2,  cancel_rect.centery  - c2.get_height()//2))
+
     return btn_rects, confirm_rect, cancel_rect
 
 def draw_trade_editor_modal(screen, p_left, p_right, offer, cx, cy):
@@ -1081,7 +1112,25 @@ def draw_jail_turn_choice_modal(screen, game, title_font, body_font, cx, cy):
     - Roll for Doubles
     Returns a dict of rects: {"use":Rect or None, "pay":Rect or None, "roll":Rect}
     """
-    info = getattr(game, "pending_jail_turn", None)
+    # Resolve the right pending-jail-turn item for the *current* player
+    info = None
+    pjt = getattr(game, "pending_jail_turn", None)
+    if isinstance(pjt, dict):
+        info = pjt
+    elif isinstance(pjt, list):
+        cur = None
+        try:
+            cur = game.players[game.current_player_index]
+        except Exception:
+            cur = None
+        if cur:
+            for j in pjt:
+                if j.get("player") is cur:
+                    info = j
+                    break
+        if info is None and pjt:
+            info = pjt[0]  # fallback
+
     if not info:
         return {"use": None, "pay": None, "roll": None}
 
@@ -1291,7 +1340,7 @@ def draw_mortgage_badges(screen, game, space_rects):
 
 def draw_debt_modal(screen, game, title_font, body_font, cx, cy):
     info = game.pending_debt
-    if not info: return None, None
+    if not info: return None, None, None
     p   = info["player"]
     amt = info["amount"]
     cred = info["creditor"]
@@ -1316,7 +1365,6 @@ def draw_debt_modal(screen, game, title_font, body_font, cx, cy):
     manage_rect = pygame.Rect(but_x + but_gap, y+150, but_w - 10, but_h)
     bk_rect  = pygame.Rect(but_x + 2 * but_gap - 10, y+150, but_w, but_h)
     can_pay  = p.money >= amt
-
 
     pygame.draw.rect(screen, (0,150,0) if can_pay else (150,150,150), pay_rect)
     pygame.draw.rect(screen, (0,120,200), manage_rect)

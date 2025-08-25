@@ -7,8 +7,10 @@ import dice
 from board import *
 import title_screen
 import player_cards
-from game import Game
+from game import Game, Property, Railroad, Utility
 from ai_mcts import MCTSMonopolyBot
+from ui_flow import roll_for_first, JailHelpers, is_ai_player
+from ai_autoplay import ai_wants_to_buy
 
 pygame.init()
 screen = pygame.display.set_mode((0, 0), pygame.RESIZABLE)
@@ -45,194 +47,27 @@ board_center = (board_size//2, board_size//2)
 # --- Global popup delay (ms). You can override at runtime via env or by passing a param to running_display ---
 DEFAULT_POPUP_DELAY_MS = int(os.getenv("POPUP_DELAY_MS", "800"))  # set to "0" for instant
 
-# Local helper for rough property value (used in trade AI inside this file)
-def _weighted_title_value(sp):
-    t = getattr(sp, "type", "")
-    if t == "Railroad":
-        return getattr(sp, "cost", 0) * 1.05
-    if t == "Utility":
-        return getattr(sp, "cost", 0) * 0.35
-    if t == "Property":
-        COLOR_WEIGHTS = {
-            (255, 165, 0): 1.30,  # Orange
-            (255, 0, 0): 1.20,    # Red
-            (173, 216, 230): 1.12,# Light Blue
-            (255, 255, 0): 1.00,  # Yellow
-            (0, 255, 0): 0.95,    # Green
-            (255, 0, 255): 0.90,  # Pink
-            (150, 75, 0): 0.85,   # Brown
-            (0, 0, 139): 0.75,    # Dark Blue
-        }
-        w = COLOR_WEIGHTS.get(getattr(sp, "color_group", None), 0.8)
-        return getattr(sp, "cost", 0) * w
-    return getattr(sp, "cost", 0) or 0
-
-def _ai_wants_to_buy(p, prop):
-    from ai_manage import AIMonopolyPropertyManager
-    mgr = AIMonopolyPropertyManager()
-    game = p.board.game
-    needed = mgr._cash_buffer_needed(game, p)   # dynamic, threat-aware buffer:contentReference[oaicite:0]{index=0}
-
-    t = getattr(prop, "type", "")
-    cost = int(getattr(prop, "cost", 0) or 0)
-
-    # Bail early if buying would drop us under buffer by too much
-    # (allow a small overreach margin on great opportunities)
-    OVERREACH = 40
-
-    if t == "Railroad":
-        # Very solid; allow small overreach
-        return (p.money - cost) >= (needed - OVERREACH)
-
-    if t == "Utility":
-        # Low EV; be stricter
-        return (p.money - cost) >= needed
-
-    if t == "Property":
-        mates = [s for s in p.board.spaces
-                 if getattr(s, "type", "") == "Property"
-                 and getattr(s, "color_group", None) == getattr(prop, "color_group", None)]
-        owned = sum(1 for s in mates if getattr(s, "owner", None) is p)
-        completes = (owned + 1) == len(mates)
-        makes_pair = (owned + 1) == 2 and len(mates) > 2
-
-        # Weighted value vs cost (you already defined _weighted_title_value)
-        w = _weighted_title_value(prop) / max(1, cost)
-
-        # Dynamic slack: push harder for high‑EV colors and set synergies
-        slack = 0
-        if completes:   slack += 70
-        elif makes_pair: slack += 40
-        if w >= 1.15:   slack += 30
-        elif w >= 1.08: slack += 15
-
-        return (p.money - cost) >= (needed - slack)
-
-    return False
-
 def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     game = Game(player_names=player_names)
     bot = MCTSMonopolyBot(name_prefix="AI")  # instantiate once
-
     game._trade_attempted_this_turn = set()
+
+    def _same_player(a, b):
+        if a is b:
+            return True
+        if not a or not b:
+            return False
+        # Prefer a unique id if your Player has one. If not, name is fine.
+        return getattr(a, "pid", None) is not None and getattr(a, "pid", None) == getattr(b, "pid", None) \
+            or getattr(a, "name", None) == getattr(b, "name", None)
+
+    JH = JailHelpers(game, _same_player)
 
     # Resolve the actual delay (env-backed default; per-call override allowed)
     AUTO_DELAY_MS = DEFAULT_POPUP_DELAY_MS if popup_delay_ms is None else max(0, int(popup_delay_ms))
 
-    # --- Centered roll-off with per-player delay, full order display, and tie re-roll for first place ---
-    def roll_for_first(game, screen, board_center, value_font):
-        players_in_order = list(game.players)   # preserve initial order for stable tie-breaking
-        roll_sum = {p: None for p in players_in_order}
-
-        def draw_round(rows, subtitle=None):
-            # rows: list of (name, sum) already rolled this sequence
-            screen.fill((255, 255, 255))
-            header = value_font.render("Rolling for turn order…", True, (0, 0, 0))
-            screen.blit(header, (screen_width//2 - header.get_width() // 2,
-                                 screen_height//2 - 120))
-            y = -60
-            for name, s in rows:
-                line = value_font.render(f"{name} rolled {s}", True, (0, 0, 0))
-                screen.blit(line, (screen_width//2 - line.get_width() // 2,
-                                   screen_height//2 + y))
-                y += 36
-            if subtitle:
-                sub = value_font.render(subtitle, True, (160, 0, 0))
-                screen.blit(sub, (screen_width//2 - sub.get_width() // 2,
-                                  screen_height//2 + 100))
-            pygame.display.flip()
-
-        # First round: everyone rolls, show each roll centered with a pause
-        round_rows = []
-        for p in players_in_order:
-            s, _ = game.dice.roll()
-            roll_sum[p] = s
-            round_rows.append((p.name, s))
-            draw_round(round_rows)
-            pygame.time.delay(1000)  # delay between each player's roll
-
-        # Break ties *within each score group only* so rerolls don't change cross-group order.
-        # We keep each group's base score and add a tiny epsilon to preserve group ranking globally.
-        def break_local_ties():
-            nonlocal roll_sum
-
-            # Group by the original integer roll result
-            score_to_players = {}
-            for p, s in roll_sum.items():
-                base = int(s)
-                score_to_players.setdefault(base, []).append(p)
-
-            # Process from highest base score to lowest so higher groups keep their precedence
-            for base_score in sorted(score_to_players.keys(), reverse=True):
-                group = score_to_players[base_score]
-                if len(group) <= 1:
-                    continue  # nothing to break here
-
-                # Keep rolling this group's players until their *within-group* results are unique
-                while True:
-                    # UI hint
-                    draw_round(round_rows, f"Tie at {base_score}. Re-rolling tied players…")
-                    pygame.time.delay(1000)
-
-                    new_vals = {}
-                    mini_rows = []
-                    for p in group:
-                        s_new, _ = game.dice.roll()
-                        new_vals[p] = s_new
-                        mini_rows.append((p.name, s_new))
-
-                        # Show *this player's* roll immediately
-                        screen.fill((255, 255, 255))
-                        header = value_font.render("Tie-break rolls…", True, (0, 0, 0))
-                        screen.blit(header, (screen_width//2 - header.get_width() // 2,
-                                            screen_height//2 - 120))
-                        y = -60
-                        for name, s2 in mini_rows:
-                            line = value_font.render(f"{name} rolled {s2}", True, (0, 0, 0))
-                            screen.blit(line, (screen_width//2 - line.get_width() // 2,
-                                            screen_height//2 + y))
-                            y += 36
-                        pygame.display.flip()
-                        pygame.time.delay(1000)  # delay between each tied player’s roll
-
-                    # Check uniqueness within this group
-                    counts = {}
-                    for v in new_vals.values():
-                        counts[v] = counts.get(v, 0) + 1
-                    if all(c == 1 for c in counts.values()):
-                        # Unique — assign tiny eps to fix their relative order inside this base band
-                        ordered_group = sorted(group, key=lambda p: new_vals[p], reverse=True)
-                        n = len(ordered_group)
-                        for rank, p in enumerate(ordered_group):
-                            eps = (n - rank) / 100.0
-                            roll_sum[p] = base_score + eps
-                        break  # resolved this group; move to next
-                    # else: loop again until unique
-
-        break_local_ties()
-
-        # Build final turn order: sort by roll_sum desc, stable for non-top ties
-        ordered_players = sorted(players_in_order, key=lambda p: roll_sum[p], reverse=True)
-        ordered_rows = [(p.name, int(roll_sum[p])) for p in ordered_players]
-
-        # Show final order centered
-        screen.fill((255, 255, 255))
-        title = value_font.render("Turn order", True, (0, 0, 0))
-        screen.blit(title, (screen_width//2 - title.get_width() // 2,
-                            screen_height//2 - 140))
-        y = -80
-        for i, (name, r) in enumerate(ordered_rows, start=1):
-            line = value_font.render(f"{i}. {name} ({r})", True, (0, 0, 0))
-            screen.blit(line, (screen_width//2 - line.get_width() // 2,
-                               screen_height//2 + y))
-            y += 36
-        pygame.display.flip()
-        pygame.time.delay(1800)
-
-        return ordered_players
-
     # Run the centered, delayed roll-off and apply the order
-    ordered_players = roll_for_first(game, screen, board_center, value_font)
+    ordered_players = roll_for_first(game, screen, screen_width, screen_height, value_font)
     game.players = ordered_players
 
     # Prevents clicks during the ordering screen
@@ -291,6 +126,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     trade_selected = set()            # set of two indices
     trade_edit_open = False           # editor modal
     trade_editor_rects = None
+    trade_initiator_idx = None
     trade_offer = {
         "left":  {"cash": 0, "gojf": 0, "props": set()},  # store prop ids here; resolve to objects on confirm
         "right": {"cash": 0, "gojf": 0, "props": set()},
@@ -299,7 +135,10 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
 
     def can_end_turn():
         # Check if you didn't roll doubles or in a popup menu
-        return has_rolled and (not is_doubles) and not (game.pending_build or game.pending_rent or game.pending_purchase or game.last_drawn_card or game.pending_debt or game.pending_jail_turn or game.pending_bankrupt_notice)
+        return has_rolled and (not is_doubles) and not (
+            game.pending_build or game.pending_rent or game.pending_purchase or 
+            game.last_drawn_card or game.pending_debt or game.pending_bankrupt_notice or
+            game.pending_jail_turn or game.pending_jail)
 
     def advance_to_next():
         nonlocal player_idx, rolled, is_doubles, has_rolled
@@ -327,7 +166,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
 
         game.current_player_index = player_idx
         nxt = game.players[player_idx]
-        if nxt.in_jail and not game.pending_jail_turn:
+        if nxt.in_jail and not JH.jail_turn_for(nxt):
             game.start_jail_turn(nxt)
 
         # Allow trades again next turn
@@ -340,9 +179,12 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     while running:
         # Check if any popups are going to happen
         def any_modal_open():
-            cur = game.players[player_idx] if game.players else None
-            jail_notice_blocks = bool(game.pending_jail and game.pending_jail.get("player") is cur)
-            jail_turn_blocks   = bool(game.pending_jail_turn and game.pending_jail_turn.get("player") is cur)
+            if game.game_over:
+                return False  # nothing else should block once the game is over
+            
+            cur = game.players[player_idx] if (game.players and 0 <= player_idx < len(game.players)) else None
+            jail_notice_blocks = JH.jail_notice_for(cur) is not None
+            jail_turn_blocks   = JH.jail_turn_for(cur) is not None
             return (
                 game.pending_purchase or game.pending_rent or game.pending_tax or
                 game.pending_build or jail_notice_blocks or jail_turn_blocks or
@@ -350,21 +192,21 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                 manage_select_open
             )
 
-        cur = game.players[player_idx] if game.players else None
+        cur = game.players[player_idx] if (game.players and 0 <= player_idx < len(game.players)) else None
         if cur and is_ai_player(cur):
             # 1) If the "Go To Jail" modal is up, acknowledge it after delay (drawn below)
-            if game.pending_jail:
-                p = game.pending_jail.get("player")
-                if p is cur and ai_jail_notice_started_at is None:
+            if JH.jail_notice_for(cur):
+                # p = game.pending_jail.get("player")
+                if ai_jail_notice_started_at is None:
                     ai_jail_notice_started_at = pygame.time.get_ticks()
 
             # 2) Jail turn choice -> wait, then act
-            if game.pending_jail_turn and game.pending_jail_turn.get("player") is cur:
+            if JH.jail_turn_for(cur):
                 now = pygame.time.get_ticks()
                 if ai_jail_turn_started_at is None:
                     ai_jail_turn_started_at = now
                 elif now - ai_jail_turn_started_at >= AUTO_DELAY_MS:
-                    # --- Board saturation -> phase detection ---
+                    # --- Phase detection by board saturation ---
                     props = [s for s in game.board.spaces if getattr(s, "type", "") == "Property"]
                     total_props = len(props) or 1
                     owned_props = sum(1 for s in props if getattr(s, "owner", None) is not None)
@@ -372,47 +214,32 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     EARLY = owned_ratio < 0.50
                     forced_third = (cur.jail_turns >= 2)
 
+                    # Strategy: EARLY prefer GOJF > Pay > Roll; LATE prefer Roll except on forced 3rd
+                    acted = False
                     if EARLY:
                         if cur.get_out_of_jail_free_cards > 0:
-                            game.use_gojf_and_exit(cur)
+                            game.use_gojf_and_exit(cur); acted = True
                         elif cur.money >= 50:
-                            game.pay_fine_and_exit(cur)
-                        else:
+                            game.pay_fine_and_exit(cur); acted = True
+                    if not acted:
+                        if not forced_third:
                             game.roll_for_doubles_from_jail(cur)
-                            rolled = (game.dice.die1_value, game.dice.die2_value)
-                            is_doubles = (rolled[0] == rolled[1])
-                            has_rolled = True
-                            if cur.in_jail:
-                                advance_to_next()
-                                ai_jail_turn_started_at = None
-                                continue
-                    else:
-                        if forced_third:
+                        else:
                             if cur.get_out_of_jail_free_cards > 0:
                                 game.use_gojf_and_exit(cur)
                             elif cur.money >= 50:
                                 game.pay_fine_and_exit(cur)
                             else:
                                 game.roll_for_doubles_from_jail(cur)
-                                rolled = (game.dice.die1_value, game.dice.die2_value)
-                                is_doubles = (rolled[0] == rolled[1])
-                                has_rolled = True
-                                if cur.in_jail:
-                                    advance_to_next()
-                                    ai_jail_turn_started_at = None
-                                    continue
-                        else:
-                            game.roll_for_doubles_from_jail(cur)
-                            rolled = (game.dice.die1_value, game.dice.die2_value)
-                            is_doubles = (rolled[0] == rolled[1])
-                            has_rolled = True
-                            if cur.in_jail:
-                                advance_to_next()
-                                ai_jail_turn_started_at = None
-                                continue
 
-                    # clear the timer after acting
+                    # If still in jail after action (i.e., unsuccessful roll and not forced third), go next player.
+                    if cur.in_jail:
+                        advance_to_next()
+
+                    # Defensive: ensure the jail-turn modal is gone in any case
+                    JH.remove_jail_turn_for(cur)
                     ai_jail_turn_started_at = None
+                    continue
 
         # === Stamp timers at the start of the frame so both humans and AIs see consistent delays ===
         now = pygame.time.get_ticks()
@@ -460,23 +287,23 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
 
         # Go-To-Jail notice
         if game.pending_jail:
-            p = game.pending_jail.get("player")
-            if p and is_ai_player(p):
-                if ai_jail_notice_started_at is None:
-                    ai_jail_notice_started_at = now
-            else:
-                if human_jail_notice_started_at is None:
-                    human_jail_notice_started_at = now
+            if cur and JH.jail_notice_for(cur):
+                if is_ai_player(cur):
+                    if ai_jail_notice_started_at is None:
+                        ai_jail_notice_started_at = now
+                else:
+                    if human_jail_notice_started_at is None:
+                        human_jail_notice_started_at = now
 
         # "You're in Jail" choice
         if game.pending_jail_turn:
-            p = game.pending_jail_turn.get("player")
-            if p and is_ai_player(p):
-                if ai_jail_turn_started_at is None:
-                    ai_jail_turn_started_at = now
-            else:
-                if human_jail_turn_started_at is None:
-                    human_jail_turn_started_at = now
+            if cur and JH.jail_turn_for(cur):
+                if is_ai_player(cur):
+                    if ai_jail_turn_started_at is None:
+                        ai_jail_turn_started_at = now
+                else:
+                    if human_jail_turn_started_at is None:
+                        human_jail_turn_started_at = now
 
         # Bankruptcy notice
         if game.pending_bankrupt_notice:
@@ -507,7 +334,18 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
 
         # === Auto-resolve AI popups AFTER the minimum read delay =========
         if cur and is_ai_player(cur):
-            # 1) Chance / Community Chest card
+            # 1) Go To Jail notice (acknowledge after showing it)
+            if JH.jail_notice_for(cur):
+                print(f"[FIX] Auto-ack Go To Jail for {cur.name}")
+                cur.in_jail = True
+                cur.position = game.board.jail_space_index
+                cur.jail_turns = 0
+                JH.remove_jail_notice_for(cur)
+                ai_jail_notice_started_at = None
+                advance_to_next()
+                continue
+            
+            # 2) Chance / Community Chest card
             if game.last_drawn_card and ai_card_started_at is not None and elapsed(ai_card_started_at):
                 pending_card = game.pending_card
                 game.last_drawn_card = None
@@ -517,31 +355,72 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     card = pending_card["card"]
                     player_card = pending_card["player"]
                     card.execute(player_card, game)
+
+                    # After executing a card for the AI
+                    if JH.jail_notice_for(cur):
+                        # Auto‑ack immediately to avoid hangs after Go-to-Jail cards
+                        cur.in_jail = True
+                        cur.position = game.board.jail_space_index
+                        cur.jail_turns = 0
+                        JH.remove_jail_notice_for(cur)
+                        # Optional: print for debugging
+                        print(f"[FIX] Auto-ack Go To Jail (post-card) for {cur.name}")
+                        advance_to_next()
+                        continue
+
                     if pending_card["type"] == "Chance":
                         game.chance_cards.append(card)
                     else:
                         game.community_chest_cards.append(card)
 
-            # 2) Rent
+            # 3) Rent
             if game.pending_rent and ai_rent_started_at is not None and elapsed(ai_rent_started_at):
                 game.settle_rent()
                 ai_rent_started_at = None
 
-            # 3) Tax
+            # 4) Tax
             if game.pending_tax and ai_tax_started_at is not None and elapsed(ai_tax_started_at):
                 game.confirm_tax()
                 ai_tax_started_at = None
 
-            # 4) Go To Jail notice (acknowledge after showing it)
-            if game.pending_jail and ai_jail_notice_started_at is not None and elapsed(ai_jail_notice_started_at):
-                p = game.pending_jail.get("player")
-                if p is cur:
-                    p.in_jail = True
-                    p.position = game.board.jail_space_index
-                    p.jail_turns = 0
-                    game.pending_jail = None
-                    ai_jail_notice_started_at = None
-                    advance_to_next()
+            # 5) Jail turn choice -> wait, then act (AI)
+            if JH.jail_turn_for(cur):
+                now = pygame.time.get_ticks()
+                if ai_jail_turn_started_at is None:
+                    ai_jail_turn_started_at = now
+                elif now - ai_jail_turn_started_at >= AUTO_DELAY_MS:
+                    # Phase detection
+                    props = [s for s in game.board.spaces if getattr(s, "type", "") == "Property"]
+                    total_props = len(props) or 1
+                    owned_props = sum(1 for s in props if getattr(s, "owner", None) is not None)
+                    EARLY = (owned_props / total_props) < 0.50
+                    forced_third = (cur.jail_turns >= 2)
+
+                    acted = False
+                    if EARLY:
+                        if cur.get_out_of_jail_free_cards > 0:
+                            game.use_gojf_and_exit(cur); acted = True
+                        elif cur.money >= 50:
+                            game.pay_fine_and_exit(cur); acted = True
+
+                    if not acted:
+                        if not forced_third:
+                            game.roll_for_doubles_from_jail(cur)
+                        else:
+                            if cur.get_out_of_jail_free_cards > 0:
+                                game.use_gojf_and_exit(cur)
+                            elif cur.money >= 50:
+                                game.pay_fine_and_exit(cur)
+                            else:
+                                game.roll_for_doubles_from_jail(cur)
+
+                    # If still jailed after the action (non-forced failed roll), pass the turn to avoid hangs
+                    if cur.in_jail:
+                        advance_to_next()
+
+                    JH.remove_jail_turn_for(cur)
+                    ai_jail_turn_started_at = None
+                    continue
 
             # 5) Purchase decision (simple fallback: buy if affordable & keep $100 buffer)
             if game.pending_purchase and ai_purchase_started_at is not None and elapsed(ai_purchase_started_at):
@@ -550,7 +429,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     affordable = info.get("affordable", True)
                     prop = info.get("property")
                     # Conservative default: buy if affordable and leaves ~$100 buffer.
-                    want_buy = bool(affordable and _ai_wants_to_buy(p, prop))
+                    want_buy = bool(affordable and ai_wants_to_buy(cur, prop))
                     game.confirm_purchase(want_buy)
                 ai_purchase_started_at = None
 
@@ -558,26 +437,24 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
             if game.pending_debt and ai_debt_started_at is not None and elapsed(ai_debt_started_at):
                 info = game.pending_debt
                 p = info.get("player")
-                if p is cur:
-                    amt  = int(info.get("amount", 0))
-                    cred = info.get("creditor")
+                cred = info.get("creditor")
+                amt = int(info.get("amount", 0))
 
-                    # If we already can pay, do it.
+                # Only auto-resolve for AI debtors
+                if p and is_ai_player(p):
                     if p.money >= amt:
                         p.pay_money(amt)
                         if cred: cred.collect_money(amt)
                         game.clear_debt()
                         ai_debt_started_at = None
                     else:
-                        from ai_manage import AIMonopolyPropertyManager
-                        from game import Property, Railroad, Utility
                         mgr = AIMonopolyPropertyManager()
 
                         progressed = True
-                        # 1) Utilities/Railroads/Unimproved properties (strict order via manager)
+                        # 1) Mortgage low-priority assets first
                         while p.money < amt and progressed:
                             progressed = False
-                            cands = mgr._non_core_mortgage_candidates(game, p)  # utilities/railroads first, then loose, then unimproved-in-monopoly
+                            cands = mgr._non_core_mortgage_candidates(game, p)
                             for _, sp in cands:
                                 if p.money >= amt:
                                     break
@@ -592,39 +469,32 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                                         sp.mortgage(p)
                                         progressed = True
 
-                        # 2) Last resort: sell houses/hotels (keeps even‑selling via can_* rules)
+                        # 2) Sell buildings as last resort
                         if p.money < amt:
-                            # Try houses first, then hotels (or vice versa—both are "fourth" tier).
-                            # We loop until we either reach amt or can’t sell any further.
                             changed = True
                             while p.money < amt and changed:
                                 changed = False
-                                # Sell one house if allowed anywhere
                                 for sp in list(p.properties_owned):
                                     if hasattr(sp, "can_sell_house") and sp.can_sell_house(p, game.board)[0]:
                                         sp.sell_house(p)
                                         changed = True
                                         if p.money >= amt: break
                                 if p.money >= amt: break
-                                # Then try hotels
                                 for sp in list(p.properties_owned):
                                     if hasattr(sp, "can_sell_hotel") and sp.can_sell_hotel(p, game.board)[0]:
                                         sp.sell_hotel(p)
                                         changed = True
                                         if p.money >= amt: break
 
-                        # Pay if we made it; else bankrupt
+                        # Pay or go bankrupt
                         if p.money >= amt:
                             p.pay_money(amt)
                             if cred: cred.collect_money(amt)
                             game.clear_debt()
                         else:
-                            # Remove debtor, transfer assets, and show the standard notice
-                            debtor = p
-                            was_current = (game.players and game.players[player_idx] is debtor)
-                            game.declare_bankruptcy(debtor, cred)
+                            was_current = (game.players and game.players[player_idx] is p)
+                            game.declare_bankruptcy(p, cred)
                             game.clear_debt()
-                            # If the AI disappeared and it was their turn, start next player cleanly
                             if was_current and not game.game_over:
                                 rolled = None
                                 is_doubles = False
@@ -634,7 +504,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                                     if nxt.in_jail and not game.pending_jail_turn:
                                         game.start_jail_turn(nxt)
 
-                        ai_debt_started_at = None
+                    ai_debt_started_at = None
 
             # 7) Bankrupt notice (close after delay so it's readable)
             if game.pending_bankrupt_notice and ai_bankrupt_started_at is not None and elapsed(ai_bankrupt_started_at):
@@ -758,49 +628,50 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     continue
 
                 # Jail popup
-                if game.pending_jail:
+                if JH.jail_notice_for(cur):
                     cx, cy = board_center
                     ok_rect = draw_jail_modal(screen, game, value_font, text_font, cx, cy)
-                    p = game.pending_jail["player"]
-                    if p and not is_ai_player(p) and not ready(human_jail_notice_started_at):
+                    if not is_ai_player(cur) and not ready(human_jail_notice_started_at):
                         continue
                     if ok_rect.collidepoint(mouse_pos):
-                        p.in_jail = True
-                        p.position = game.board.jail_space_index
-                        p.jail_turns = 0
-                        game.pending_jail = None
+                        cur.in_jail = True
+                        cur.position = game.board.jail_space_index
+                        cur.jail_turns = 0
+                        JH.remove_jail_notice_for(cur)
                         human_jail_notice_started_at = None
                         advance_to_next()
                     continue
 
                 # Jail-turn choice modal blocks everything else
-                if game.pending_jail_turn:
+                if JH.jail_turn_for(cur):
                     cx, cy = board_center
                     rects = draw_jail_turn_choice_modal(screen, game, value_font, text_font, cx, cy)
                     r_use, r_pay, r_roll = rects["use"], rects["pay"], rects["roll"]
-                    p = game.pending_jail_turn["player"]
-                    if p and not is_ai_player(p) and not ready(human_jail_turn_started_at):
+                    if not is_ai_player(cur) and not ready(human_jail_turn_started_at):
                         continue
 
                     if r_use and r_use.collidepoint(mouse_pos):
-                        game.use_gojf_and_exit(p)
+                        game.use_gojf_and_exit(cur)
+                        JH.remove_jail_turn_for(cur)
                         human_jail_turn_started_at = None
                         rolled = None; is_doubles = False; has_rolled = False
                         continue
 
                     if r_pay and r_pay.collidepoint(mouse_pos):
-                        game.pay_fine_and_exit(p)
+                        game.pay_fine_and_exit(cur)
+                        JH.remove_jail_turn_for(cur)
                         human_jail_turn_started_at = None
                         rolled = None; is_doubles = False; has_rolled = False
                         continue
 
                     if r_roll and r_roll.collidepoint(mouse_pos):
-                        game.roll_for_doubles_from_jail(p)
+                        game.roll_for_doubles_from_jail(cur)
+                        JH.remove_jail_turn_for(cur)
                         human_jail_turn_started_at = None
                         rolled = (game.dice.die1_value, game.dice.die2_value)
                         is_doubles = (rolled[0] == rolled[1])
                         has_rolled = True
-                        if p.in_jail:
+                        if cur.in_jail:
                             advance_to_next()
                         continue
 
@@ -1030,26 +901,43 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                 if trade_select_open:
                     cx, cy = board_center
                     btn_rects, confirm_rect, cancel_rect = draw_trade_select_modal(
-                        screen, game.players, trade_selected, cx, cy
+                        screen, game.players, trade_selected, cx, cy, initiator_idx=trade_initiator_idx
                     )
+                    clicked_any = False
+
                     for i, r in enumerate(btn_rects):
                         if r.collidepoint(mouse_pos):
-                            if i in trade_selected: trade_selected.remove(i)
+                            clicked_any = True
+                            # Do not allow selecting yourself
+                            if i == trade_initiator_idx:
+                                break
+                            # Allow selecting exactly one *other* player
+                            if i in trade_selected:
+                                trade_selected.remove(i)     # toggle off
                             else:
-                                if len(trade_selected) < 2: trade_selected.add(i)
+                                trade_selected.clear()       # only one allowed
+                                trade_selected.add(i)
                             break
-                    else:
-                        if confirm_rect.collidepoint(mouse_pos) and len(trade_selected) == 2:
-                            iL, iR = sorted(list(trade_selected))
+
+                    if not clicked_any:
+                        # Confirm requires exactly one other player
+                        if confirm_rect.collidepoint(mouse_pos) and len(trade_selected) == 1:
+                            i_other = next(iter(trade_selected))
+                            iL, iR = trade_initiator_idx, i_other   # initiator proposes to the selected player
                             trade_pair = (iL, iR)
                             trade_edit_open = True
                             trade_editor_rects = draw_trade_editor_modal(
-                                screen, game.players[iL], game.players[iR], trade_offer, board_center[0], board_center[1]
+                                screen, game.players[iL], game.players[iR],
+                                trade_offer, board_center[0], board_center[1]
                             )
                             trade_select_open = False
+                            # keep the initiator for editor phase; selection set is no longer needed
+                            trade_selected.clear()
+
                         elif cancel_rect.collidepoint(mouse_pos):
                             trade_select_open = False
                             trade_selected.clear()
+                            trade_initiator_idx = None
                     continue  # block others while selection is open
 
                 # --- MANAGE: selection modal blocks everything ---
@@ -1089,8 +977,10 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
 
                 # --- Trade button click (only when no other modals are up) ---
                 if trade_rect and trade_rect.collidepoint(mouse_pos):
-                    trade_select_open = True
-                    trade_selected.clear()
+                    if player_idx == game.current_player_index:
+                        trade_select_open = True
+                        trade_selected.clear()
+                        trade_initiator_idx = player_idx   # remember who is proposing
                     continue
 
                 # --- Manage button click ---
@@ -1112,7 +1002,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                 player = game.players[player_idx]
 
                 if player.in_jail:
-                    if not game.pending_jail_turn:
+                    if not JH.jail_turn_for(player):
                         game.start_jail_turn(player)
                     continue
 
@@ -1128,7 +1018,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     player.doubles_rolled_consecutive += 1
                     if player.doubles_rolled_consecutive == 3:
                         print(f"{player.name} rolled 3 doubles! Go to jail.")
-                        game.pending_jail = {"player": player}
+                        game.pending_jail.append({"player": player})
                         player.doubles_rolled_consecutive = 0
                         rolled = None
                         is_doubles = False
@@ -1162,8 +1052,9 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
             modals_open = (
                 game.last_drawn_card or game.pending_purchase or game.pending_rent or
                 game.pending_tax or game.pending_build or game.pending_debt or
-                game.pending_jail or game.pending_jail_turn or game.pending_bankrupt_notice or
-                game.pending_trade
+                JH.jail_notice_for(current_player) or         
+                JH.jail_turn_for(current_player) or 
+                game.pending_bankrupt_notice or game.pending_trade
             )
             if not modals_open:
                 intent = bot.step(game, current_player, iterations=600)
@@ -1174,8 +1065,13 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     current_player.move(roll_total, game.board)
 
             # End turn automatically if allowed
-            if (has_rolled and (not is_doubles) and not (game.pending_build or game.pending_rent or game.pending_purchase or game.last_drawn_card or game.pending_debt or game.pending_jail_turn or game.pending_bankrupt_notice or game.pending_trade)):
+            if (has_rolled and (not is_doubles) and not (
+                game.pending_build or game.pending_rent or game.pending_purchase or 
+                game.last_drawn_card or game.pending_debt or game.pending_bankrupt_notice or
+                game.pending_jail_turn or game.pending_jail)):
+    
                 advance_to_next()
+
 
         # Make interactable buttons
         dice.make_dice_button(screen, circ_color, circ_center, circ_rad, enable=enable_dice)
@@ -1247,7 +1143,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     ai_purchase_started_at = pygame.time.get_ticks()
                 elif elapsed(ai_purchase_started_at):
                     # Heuristic: buy if affordable AND keep a small buffer
-                    want_buy = bool(affordable and _ai_wants_to_buy(p, prop))
+                    want_buy = bool(affordable and ai_wants_to_buy(p, prop))
                     game.confirm_purchase(want_buy)
                     ai_purchase_started_at = None
             else:
@@ -1299,75 +1195,83 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     human_tax_started_at = pygame.time.get_ticks()
                 draw_tax_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
-        elif game.pending_jail:
-            p = game.pending_jail.get("player")
+        elif JH.jail_notice_for(cur):
             draw_jail_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
 
-            if p and is_ai_player(p):
+            if is_ai_player(cur):
                 if ai_jail_notice_started_at is None:
                     ai_jail_notice_started_at = pygame.time.get_ticks()
                 elif elapsed(ai_jail_notice_started_at):
-                    p.in_jail = True
-                    p.position = game.board.jail_space_index
-                    p.jail_turns = 0
-                    game.pending_jail = None
+                    cur.in_jail = True
+                    cur.position = game.board.jail_space_index
+                    cur.jail_turns = 0
+                    JH.remove_jail_notice_for(cur)
                     ai_jail_notice_started_at = None
                     advance_to_next()
             else:
                 if human_jail_notice_started_at is None:
                     human_jail_notice_started_at = pygame.time.get_ticks()
 
-        elif game.pending_jail_turn:
-            p = game.pending_jail_turn.get("player")
+        elif JH.jail_turn_for(cur):
             draw_jail_turn_choice_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
-
-            if p and is_ai_player(p):
+            if cur and is_ai_player(cur):
                 # Start timer (once)
                 if ai_jail_turn_started_at is None:
                     ai_jail_turn_started_at = pygame.time.get_ticks()
                 # After min read time, make the AI choice automatically
                 elif elapsed(ai_jail_turn_started_at):
+                    print(f"[DEBUG] AI {cur.name} jail-turn decision starting. "
+                        f"jail_turns={cur.jail_turns}, money={cur.money}, "
+                        f"GOJF={cur.get_out_of_jail_free_cards}, in_jail={cur.in_jail}")
                     # --- Phase detection: early vs late game
                     props = [s for s in game.board.spaces if getattr(s, "type", "") == "Property"]
                     total_props = len(props) or 1
                     owned_props = sum(1 for s in props if getattr(s, "owner", None) is not None)
                     owned_ratio = owned_props / total_props
                     EARLY = owned_ratio < 0.50
-                    forced_third = (p.jail_turns >= 2)
+                    forced_third = (cur.jail_turns >= 2)
 
                     if EARLY:
-                        if p.get_out_of_jail_free_cards > 0:
-                            game.use_gojf_and_exit(p)
-                        elif p.money >= 50:
-                            game.pay_fine_and_exit(p)
+                        if cur.get_out_of_jail_free_cards > 0:
+                            game.use_gojf_and_exit(cur)
+                            print(f"[DEBUG] AI {cur.name} chose GOJF. in_jail={cur.in_jail}, jail_turns={cur.jail_turns}, pos={cur.position}")
+                        elif cur.money >= 50:
+                            game.pay_fine_and_exit(cur)
+                            print(f"[DEBUG] AI {cur.name} chose GOJF. in_jail={cur.in_jail}, jail_turns={cur.jail_turns}, pos={cur.position}")
                         else:
-                            game.roll_for_doubles_from_jail(p)
+                            game.roll_for_doubles_from_jail(cur)
+                            print(f"[DEBUG] AI {cur.name} chose GOJF. in_jail={cur.in_jail}, jail_turns={cur.jail_turns}, pos={cur.position}")
                             rolled = (game.dice.die1_value, game.dice.die2_value)
                             is_doubles = (rolled[0] == rolled[1])
                             has_rolled = True
-                            if p.in_jail:
+                            if cur.in_jail:
                                 advance_to_next()
                                 ai_jail_turn_started_at = None
+
                     else:
                         if forced_third:
-                            if p.get_out_of_jail_free_cards > 0:
-                                game.use_gojf_and_exit(p)
-                            elif p.money >= 50:
-                                game.pay_fine_and_exit(p)
+                            if cur.get_out_of_jail_free_cards > 0:
+                                game.use_gojf_and_exit(cur)
+                                print(f"[DEBUG] AI {cur.name} chose GOJF. in_jail={cur.in_jail}, jail_turns={cur.jail_turns}, pos={cur.position}")
+                            elif cur.money >= 50:
+                                game.pay_fine_and_exit(cur)
+                                print(f"[DEBUG] AI {cur.name} chose GOJF. in_jail={cur.in_jail}, jail_turns={cur.jail_turns}, pos={cur.position}")
                             else:
-                                game.roll_for_doubles_from_jail(p)
+                                game.roll_for_doubles_from_jail(cur)
+                                print(f"[DEBUG] AI {cur.name} chose GOJF. in_jail={cur.in_jail}, jail_turns={cur.jail_turns}, pos={cur.position}")
                                 rolled = (game.dice.die1_value, game.dice.die2_value)
                                 is_doubles = (rolled[0] == rolled[1])
                                 has_rolled = True
-                                if p.in_jail:
+                                if cur.in_jail:
                                     advance_to_next()
                                     ai_jail_turn_started_at = None
                         else:
-                            game.roll_for_doubles_from_jail(p)
+                            game.roll_for_doubles_from_jail(cur)
+                            print(f"[DEBUG] AI {cur.name} chose GOJF. in_jail={cur.in_jail}, jail_turns={cur.jail_turns}, pos={cur.position}")
                             rolled = (game.dice.die1_value, game.dice.die2_value)
                             is_doubles = (rolled[0] == rolled[1])
                             has_rolled = True
-                            if p.in_jail:
+                            if cur.in_jail:
                                 advance_to_next()
                                 ai_jail_turn_started_at = None
 
@@ -1409,19 +1313,58 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     ai_trade_started_at = pygame.time.get_ticks()
 
                 elif elapsed(ai_trade_started_at):
-                    # Simple AI policy: accept if favorable; else try a small mirrored counter; else reject
-                    t = game.pending_trade
+                    t  = game.pending_trade
                     me = responder
 
-                    # Determine my side in current pending offer
+                    # Figure out MY side in this proposal
                     if me is t["left"]:
-                        my_now = t["offer_left"]
-                        opp_now = t["offer_right"]
+                        my_get  = t["offer_right"]   # what I would receive
+                        my_give = t["offer_left"]    # what I would give
                     else:
-                        my_now = t["offer_right"]
-                        opp_now = t["offer_left"]
+                        my_get  = t["offer_left"]
+                        my_give = t["offer_right"]
 
-                    # Accept if engine says it's >= 0 for me
+                    # --- Priority filters ---
+                    def _offer_is_empty(offer: dict) -> bool:
+                        return (int(offer.get("cash", 0)) <= 0 and
+                                int(offer.get("gojf", 0)) <= 0 and
+                                len(offer.get("props", [])) == 0)
+
+                    # 1) If I'm receiving nothing → reject immediately
+                    if _offer_is_empty(my_get):
+                        ok, msg = game.reject_trade()
+                        print("AI auto-reject: receiving nothing of value. " + msg)
+                        ai_trade_started_at = None
+                        if hasattr(game, "_trade_attempted_this_turn"):
+                            game._trade_attempted_this_turn.update({ t["left"], t["right"] })
+                        continue
+
+                    # 2) If I'm giving something but getting nothing → reject
+                    if (not _offer_is_empty(my_give)) and _offer_is_empty(my_get):
+                        ok, msg = game.reject_trade()
+                        print("AI auto-reject: giving value for zero return.")
+                        ai_trade_started_at = None
+                        if hasattr(game, "_trade_attempted_this_turn"):
+                            game._trade_attempted_this_turn.update({ t["left"], t["right"] })
+                        continue
+
+                    # 3) Quick lopsided check using rough values
+                    try:
+                        v_get  = game._rough_offer_value(my_get)
+                        v_give = game._rough_offer_value(my_give)
+                    except Exception:
+                        v_get, v_give = 0, 0
+
+                    if v_give > 0 and v_get < int(0.80 * v_give):
+                        ok, msg = game.reject_trade()
+                        print(f"AI auto-reject: lopsided deal (get {v_get} << give {v_give}).")
+                        ai_trade_started_at = None
+                        if hasattr(game, "_trade_attempted_this_turn"):
+                            game._trade_attempted_this_turn.update({ t["left"], t["right"] })
+                        continue
+                    # --- End priority filters ---
+
+                    # If passes: accept if favorable, else counter lightly
                     try:
                         delta_for_me = game.rough_trade_delta_for(me)
                     except Exception:
@@ -1431,13 +1374,10 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                         ok, msg = game.accept_trade()
                         print(msg)
                         ai_trade_started_at = None
-
                     else:
-                        # Build a small counter by mirroring and nudging cash by -$50 on my side
+                        # Build a mirrored counter with small cash adjustment
                         new_offer_left  = dict(t["offer_right"])
                         new_offer_right = dict(t["offer_left"])
-
-                        # If I was left in the current trade, in the mirrored counter I become right
                         my_counter_side = "right" if (me is t["left"]) else "left"
 
                         if my_counter_side == "left":
@@ -1448,17 +1388,16 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                         ok, msg = game.counter_trade(new_offer_left, new_offer_right)
                         print(msg)
                         ai_trade_started_at = None
-                    
-                    # Block fresh trades by either side for the rest of this turn
-                    t2 = game.pending_trade or t  # if trade closed, use last known t
-                    left_p, right_p = t2["left"], t2["right"]
+
+                    # Mark trade attempt for this turn
+                    t2 = game.pending_trade or t
                     if hasattr(game, "_trade_attempted_this_turn"):
-                        game._trade_attempted_this_turn.update({ left_p, right_p })
+                        game._trade_attempted_this_turn.update({ t2["left"], t2["right"] })
 
             else:
                 if human_trade_started_at is None:
                     human_trade_started_at = pygame.time.get_ticks()
-
+                    
         elif selected_space is not None:
             property_characteristic(screen, selected_space, board_size, screen_height)
 
@@ -1492,11 +1431,14 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
 
 
 if __name__ == "__main__":
-    names_or_count = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
-    if isinstance(names_or_count, list):
-        player_names = names_or_count
-    else:
-        # fallback: old flow where only number was returned
-        player_names = [f"Player {i+1}" for i in range(int(names_or_count))]
+    # names_or_count = title_screen.run_title_screen(screen, clock, screen_width, screen_height)
+    # if isinstance(names_or_count, list):
+    #     player_names = names_or_count
+    # else:
+    #     # fallback: old flow where only number was returned
+    #     player_names = [f"Player {i+1}" for i in range(int(names_or_count))]
 
-    running_display(player_names, popup_delay_ms=1000)
+    # player_names = ["AI1", "Troy", "Thomas", "Tenzin"]
+    player_names = ["AI1", "AI2", "AI3", "AI4"]
+    # player_names = ["Troy", "Thomas"]
+    running_display(player_names, popup_delay_ms=0)

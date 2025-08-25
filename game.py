@@ -117,7 +117,7 @@ class Card:
             game.board.spaces[player.position].land_on(player, game.board)
 
         elif self.action_type == "go_to_jail":
-            game.pending_jail = {"player": player}
+            game.pending_jail.append({"player": player})
             player.doubles_rolled_consecutive = 0
             print(f"{player.name} sent to Jail (via card)!")
 
@@ -581,7 +581,7 @@ class GoToJailSpace(Space):
         # player.in_jail = True
         # player.position = board.jail_space_index # Move to Jail space
         # player.jail_turns = 0 # Reset jail turns for entering via card
-        board.game.pending_jail = {"player": player}
+        board.game.pending_jail.append({"player": player})
         player.doubles_rolled_consecutive = 0
 
 class JailSpace(Space):
@@ -703,8 +703,8 @@ class Game:
         self.pending_build = None
         self.pending_rent = None
         self.pending_tax = None
-        self.pending_jail = None
-        self.pending_jail_turn = None
+        self.pending_jail = []
+        self.pending_jail_turn = []
         self.pending_debt = None
         self.pending_bankrupt_notice = None
         self.pending_trade = None
@@ -760,8 +760,8 @@ class Game:
             self.pending_rent = None
             self.pending_tax = None
             self.pending_build = None
-            self.pending_jail = None
-            self.pending_jail_turn = None
+            self.pending_jail = []
+            self.pending_jail_turn = []
             self.pending_debt = None
             self.pending_bankrupt_notice = None
 
@@ -815,8 +815,11 @@ class Game:
             self.pending_build = None
         if self.pending_tax and self.pending_tax.get("player") is debtor:
             self.pending_tax = None
-        if self.pending_jail and self.pending_jail.get("player") is debtor:
-            self.pending_jail = None
+        if isinstance(self.pending_jail, list):
+            self.pending_jail = [j for j in self.pending_jail if j.get("player") is not debtor]
+        else:
+            self.pending_jail = []
+
         if self.pending_debt and self.pending_debt.get("player") is debtor:
             self.pending_debt = None
 
@@ -1036,10 +1039,9 @@ class Game:
                 print(f"  {player.name} rolled DOUBLES! ({player.doubles_rolled_consecutive} consecutive)")
                 if player.doubles_rolled_consecutive == 3:
                     print(f"  {player.name} rolled 3 doubles in a row! Go to Jail!")
-                    player.in_jail = True
-                    player.position = self.board.jail_space_index
-                    player.jail_turns = 0 # Reset jail turns for entering via 3 doubles
-                    player.doubles_rolled_consecutive = 0 # Reset for next time
+                    # enqueue consistent jail notice so UI handles it like other jail events
+                    self.pending_jail.append({"player": player})
+                    player.doubles_rolled_consecutive = 0
                     return # Turn ends after going to jail
             else:
                 player.doubles_rolled_consecutive = 0 # Reset if no doubles
@@ -1110,91 +1112,104 @@ class Game:
             print(f"  {player.name} could not roll doubles and remains in Jail.")
 
     def start_jail_turn(self, player):
-        if not self._is_current_player(player):
+        if not getattr(player, "in_jail", False):
             return
-        self.pending_jail_turn = {"player": player}
+        if not any(j.get("player") is player for j in self.pending_jail_turn):
+            self.pending_jail_turn.append({"player": player})
+            print(f"  {player.name} attempts to roll for doubles to get out of Jail...")
+
+    def _clear_player_jail_turn(self, player):
+        """Remove this player's jail-turn modal item if present."""
+        self.pending_jail_turn = [j for j in self.pending_jail_turn if j.get("player") is not player]
 
     def use_gojf_and_exit(self, player):
-        if not self._is_current_player(player):
-            return
-        
-        if player.get_out_of_jail_free_cards > 0:
+        """Use a Get Out of Jail Free card (if present), release, and allow normal turn."""
+        if player.get_out_of_jail_free_cards > 0 and player.in_jail:
             player.get_out_of_jail_free_cards -= 1
             player.in_jail = False
             player.jail_turns = 0
-            player.position = self.board.jail_space_index   # Keep the player on the jail space 
-            print(f"{player.name} used a Get Out of Jail Free card and is now out of Jail.")
-            # roll_sum, _ = self.dice.roll()
-            # player.move(roll_sum, self.board)
-        
-        else:
-            print(f"{player.name} has no Get Out of Jail Free card.")
-        self.pending_jail_turn = None
+            print(f"{player.name} used a Get Out of Jail Free card and is released from Jail.")
+        self._clear_player_jail_turn(player)
 
     def pay_fine_and_exit(self, player):
-        if not self._is_current_player(player):
-            return
-        
-        if player.money >= 50:
-            player.pay_money(50)
+        """Pay $50 (or start debt), release, and allow normal turn."""
+        if player.in_jail:
+            fine = 50
+            if player.money >= fine:
+                player.pay_money(fine)
+            else:
+                # Start debt to Bank. Once cleared, they’re out of jail.
+                self.start_debt(player, fine, creditor=None, reason="Jail Fine")
             player.in_jail = False
             player.jail_turns = 0
-            player.position = self.board.jail_space_index   # Keep the player on the jail space 
-            print(f"{player.name} paid $50 and is now out of Jail.")
-            # roll_sum, _ = self.dice.roll()
-            # player.move(roll_sum, self.board)
-        
-        else:
-            print(f"{player.name} cannot afford to pay $50.")
-        self.pending_jail_turn = None
+            print(f"{player.name} paid $50 and is released from Jail.")
+        self._clear_player_jail_turn(player)
 
     def roll_for_doubles_from_jail(self, player):
-        if not self._is_current_player(player):
+        """
+        Roll while in jail. If doubles: release and move.
+        Else: remain in jail unless this is the forced 3rd attempt,
+            in which case pay $50 (or debt), release, and move by the roll.
+        """
+        # safety: if somehow not in jail, do nothing special
+        if not player.in_jail:
             return
-        
-        print(f"  {player.name} attempts to roll for doubles to get out of Jail...")
-        player.jail_turns += 1
+
+        # Roll the dice
         roll_sum, is_double = self.dice.roll()
+
+        forced_third = (player.jail_turns >= 2)
         if is_double:
+            # Exit and move normally
             player.in_jail = False
             player.jail_turns = 0
-            print(f"  {player.name} rolled doubles and is now out of Jail!")
+            print(f"  {player.name} rolled doubles and is released from Jail.")
+            # Move per the roll that freed them
             player.move(roll_sum, self.board)
-        
-        elif player.jail_turns >= 3:
-            print(f"  {player.name} could not roll doubles on 3rd attempt. Must pay $50.")
-            if player.money >= 50:
-                player.pay_money(50)
+        else:
+            if forced_third:
+                # Must pay $50 (or go into debt), then move by this roll
+                fine = 50
+                if player.money >= fine:
+                    player.pay_money(fine)
+                else:
+                    self.start_debt(player, fine, creditor=None, reason="Jail Fine (forced)")
                 player.in_jail = False
                 player.jail_turns = 0
-                print(f"  {player.name} paid $50 and is now out of Jail.")
+                print(f"  {player.name} failed to roll doubles on the 3rd attempt, pays $50 and is released.")
                 player.move(roll_sum, self.board)
             else:
-                print(f"  {player.name} cannot pay $50 and is bankrupt! Game Over for {player.name}.")
-                self.declare_bankruptcy(player, creditor=None)
-                # if len(self.players) == 1:
-                #     self.game_over = True
-                #     print(f"\n--- Game Over! {self.players[0].name} is the winner! ---")
-        
-        else:
-            print(f"  {player.name} could not roll doubles and remains in Jail.")
-        self.pending_jail_turn = None
+                # Stay in jail; increase counter
+                player.jail_turns += 1
+                print(f"  {player.name} could not roll doubles and remains in Jail.")
+
+        # Always clear the modal entry after resolving this click/choice
+        self._clear_player_jail_turn(player)
 
     def start_trade_proposal(self, left, right, offer_left, offer_right):
         """
-        Save a proposal for review. 'left' and 'right' are Player objects.
-        offer_* are dicts like: {"cash": int, "gojf": int, "props": list[Space]}
-        The 'responder' is the player who must accept/reject/counter next.
+        Save a proposal for review. Only the current player can initiate a trade.
         """
+        # Restrict initiating to the current player’s turn
+        if left is not self.players[self.current_player_index]:
+            print(f"Invalid trade: {left.name} tried to start a trade outside their turn.")
+            return False
+
+        # Prevent trades with yourself
+        if left is right:
+            print("Invalid trade: cannot trade with yourself.")
+            return False
+
         self.pending_trade = {
             "left": left,
             "right": right,
             "offer_left": offer_left,
             "offer_right": offer_right,
-            "responder": right,     # right responds first to left’s proposal
-            "prev":None,
-            "ctr_n":0,
+            "responder": right,
+            "prev": None,
+            "ctr_n": 0,
         }
+        return True
 
     def accept_trade(self):
         """Apply the current proposal and clear it."""

@@ -595,6 +595,31 @@ class MCTSMonopolyBot:
                 if not delta_ok:
                     continue
 
+                # --- Additional sanity checks using game heuristics ---
+                me_get  = {"cash": offer_right["cash"], "gojf": offer_right["gojf"], "props": offer_right.get("props", [])}
+                me_give = {"cash": offer_left["cash"], "gojf": offer_left["gojf"], "props": offer_left.get("props", [])}
+
+                # 1. Don’t break pairs unless I gain a monopoly
+                if game.would_break_pair_without_monopoly(me, me_get, me_give):
+                    continue  # skip this trade entirely
+
+                # 2. If the opponent would get a monopoly and I don’t, demand a premium
+                if game.would_grant_monopoly(owner, me_give, me_get) and not game.would_grant_monopoly(me, me_get, me_give):
+                    # increase required edge or just skip
+                    continue
+
+                # 3. Mortgaged properties should be worth less
+                for sp in me_get["props"]:
+                    if getattr(sp, "is_mortgaged", False):
+                        # apply a discount to effective value
+                        offer_right["cash"] = max(0, offer_right["cash"] - int(sp.mortgage_value * 0.5))
+
+                # 4. Cancel if the fairness check shows the other side loses too much
+                dl_me  = game.rough_trade_delta_for(me)
+                dl_own = game.rough_trade_delta_for(owner)
+                if dl_own < -base * 0.15:  # owner would lose more than ~15% of value
+                    continue
+
                 # Propose it!
                 game.start_trade_proposal(me, owner, offer_left, offer_right)
                 tried = getattr(game, "_trade_attempted_this_turn", None)

@@ -4,6 +4,38 @@ from collections import Counter
 from game import Game
 from ai_mcts import MCTSMonopolyBot, ActionModel, mcts_decide
 
+'''
+python sim_eval.py --games 1000 --mode selfplay --out selfplay_1k2.csv 
+
+
+python sim_eval.py --games [number of games] --mode [type of game] --out [output csv file]
+- Type of game is either selfplay or vs_proxies 
+
+'''
+
+class _TradeProxyBase:
+    def __init__(self, prefix):
+        self.prefix = prefix
+        # Reuse the MCTS bot's trade probing logic; we WON'T use its full step()
+        self._mcts = MCTSMonopolyBot(name_prefix=prefix)
+
+    def maybe_initiate_trade(self, game, me):
+        """Return True if a proposal was started this call."""
+        # Block if a negotiation is already open this turn, or if we already tried
+        if getattr(game, "pending_trade", None):
+            return False
+        tried = getattr(game, "_trade_attempted_this_turn", None)
+        if isinstance(tried, set) and (me in tried):
+            return False
+        # Delegate to the MCTS bot's _try_trade heuristic
+        return bool(self._mcts._try_trade(game, me))
+
+class GreedyProxy(_TradeProxyBase):
+    def __init__(self): super().__init__("Greedy")
+
+class CautiousProxy(_TradeProxyBase):
+    def __init__(self): super().__init__("Cautious")
+
 # --- Simple scripted "human proxy" opponents -------------------------------
 class BuyAllBot:      # always buys if it can; never trades
     name = "BuyAll"
@@ -84,6 +116,69 @@ def resolve_all_modals(game, current):
                     a = mcts_decide(game, p, iterations=600)
                     model.apply(a)
                     changed = True; break
+        
+        # Trade: headless review/response for proxies and AIs
+        if getattr(game, "pending_trade", None):
+            t = game.pending_trade
+            responder = t.get("responder")
+            # Identify the responder's "side" in current proposal
+            my_get  = t["offer_right"] if responder is t["left"] else t["offer_left"]
+            my_give = t["offer_left"]  if responder is t["left"] else t["offer_right"]
+
+            # Rough value delta using engine helper (>=0 means favorable for me)
+            try:
+                delta_for_me = game.rough_trade_delta_for(responder)
+            except Exception:
+                delta_for_me = 0
+
+            # Does this give me a monopoly? Use engine helpers.
+            completes = game.would_grant_monopoly(responder, my_get, my_give)
+            breaks_pair_bad = game.would_break_pair_without_monopoly(responder, my_get, my_give)
+
+            name = str(getattr(responder, "name", ""))
+            is_greedy   = name.lower().startswith("greedy")
+            is_cautious = name.lower().startswith("cautious")
+
+            # Acceptance thresholds:
+            # - Greedy: accept any non-negative deal; if it completes a set, accept down to -25
+            # - Cautious: require a small positive edge (+$25), unless it completes a set (then >=0)
+            accept = False
+            if is_greedy:
+                accept = (delta_for_me >= 0) or (completes and delta_for_me >= -25)
+            elif is_cautious:
+                accept = (delta_for_me >= 25) or (completes and delta_for_me >= 0)
+            else:
+                # Fallback for other AIs: non-negative is fine
+                accept = (delta_for_me >= 0)
+
+            # Don’t accept if it breaks our current 2-of-a-color without gaining any set
+            if breaks_pair_bad and not completes:
+                accept = False
+
+            if accept:
+                ok, msg = game.accept_trade()
+                # print(msg)  # optional noisy logging
+                changed = True
+                continue
+
+            # Otherwise: try one gentle counter (ask the other side for +$50 toward me),
+            # capped by their current cash. Respect the engine's 2-counter auto-decline.
+            new_offer_left  = dict(t["offer_left"])
+            new_offer_right = dict(t["offer_right"])
+            other = t["right"] if responder is t["left"] else t["left"]
+            ask_more = min(50, max(0, getattr(other, "money", 0) - 150))  # don't drain their buffer completely
+
+            if responder is t["left"]:
+                new_offer_right["cash"] = int(new_offer_right.get("cash", 0)) + ask_more
+            else:
+                new_offer_left["cash"]  = int(new_offer_left.get("cash", 0))  + ask_more
+
+            ok, msg = game.counter_trade(new_offer_left, new_offer_right)
+            # print(msg)
+            changed = True
+            continue
+
+
         # Bankrupt notice
         if getattr(game, "pending_bankrupt_notice", None):
             game.pending_bankrupt_notice = None
@@ -97,7 +192,12 @@ def play_one_game(seed, mode="selfplay"):
         bots  = {n: MCTSMonopolyBot("AI") for n in names}
     else:
         names = ["AI 1","BuyAll","Cautious","Greedy"]
-        bots  = {"AI 1": MCTSMonopolyBot("AI")}
+        bots  = {
+            "AI 1":    MCTSMonopolyBot("AI"),
+            "BuyAll":  None,              # never trades; buys via existing modal logic
+            "Cautious": CautiousProxy(),  # can initiate + review trades
+            "Greedy":   GreedyProxy(),    # can initiate + review trades
+        }
     game = Game(player_names=names)
     # Rotate starting seat to reduce bias
     rot = seed % len(game.players)
@@ -110,6 +210,16 @@ def play_one_game(seed, mode="selfplay"):
     while not game.game_over and turns < MAX_TURNS and len(game.players) > 1:
         cur = game.players[game.current_player_index % len(game.players)]
         resolve_all_modals(game, cur)
+
+        # Give proxies a chance to propose a trade before rolling
+        if mode == "vs_proxies":
+            nm = str(getattr(cur, "name", ""))
+            if nm == "Greedy":
+                GreedyProxy().maybe_initiate_trade(game, cur)
+                resolve_all_modals(game, cur)
+            elif nm == "Cautious":
+                CautiousProxy().maybe_initiate_trade(game, cur)
+                resolve_all_modals(game, cur)
 
         # If the current player is in jail and has a pending jail-turn choice, resolve via AI model
         if getattr(game,"pending_jail_turn",None):
