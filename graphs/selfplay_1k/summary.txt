@@ -1,0 +1,12 @@
+File: C:\Users\pokem\OneDrive\Desktop\Monopoly_AI_Game\CSV_Files\selfplay_1k.csv
+n_rows:
+1000
+
+winners:
+AI 3: 262 / 1000  (26.2%)  95% CI [23.6%, 29.0%]
+AI 4: 262 / 1000  (26.2%)  95% CI [23.6%, 29.0%]
+AI 1: 249 / 1000  (24.9%)  95% CI [22.3%, 27.7%]
+AI 2: 227 / 1000  (22.7%)  95% CI [20.2%, 25.4%]
+
+turns:
+Median 300.0, IQR [300.0, 300.0]

@@ -21,23 +21,23 @@ import random
 
 # Color weights approximate ROI/landing frequency (relative biases)
 COLOR_WEIGHTS = {
-    (255, 165, 0): 1.30,  # Orange
-    (255, 0, 0): 1.20,    # Red
-    (173, 216, 230): 1.12,# Light Blue
+    (255, 165, 0): 1.32,  # Orange
+    (255, 0, 0): 1.22,    # Red
+    (173, 216, 230): 1.18,# Light Blue
     (255, 255, 0): 1.00,  # Yellow
     (0, 255, 0): 0.95,    # Green
     (255, 0, 255): 0.90,  # Pink
     (150, 75, 0): 0.85,   # Brown
     (0, 0, 139): 0.75,    # Dark Blue (swingy, expensive)
-    "RAIL": 1.05,
-    "UTIL": 0.35,
+    "RAIL": 1.15,
+    "UTIL": 0.25,
 }
 
 # Rent escalation emphasis for houses up to 3
-HOUSE_STEP_WEIGHT = [0.0, 1.0, 1.6, 2.2, 1.1, 0.6]  # [base,1,2,3,4,hotel]
+HOUSE_STEP_WEIGHT = [0.0, 1.0, 1.8, 2.6, 1.0, 0.5]  # [base,1,2,3,4,hotel]
 
 # Safety cash buffer (prefer to keep at least this much liquid)
-MIN_CASH_BUFFER = 200
+MIN_CASH_BUFFER = 150
 
 try:
     from ai_manage import decide_and_apply_management
@@ -107,7 +107,7 @@ class Node:
     visits: int = 0
     total_value: float = 0.0
 
-    def uct_select_child(self, c: float = 1.25) -> "Node":
+    def uct_select_child(self, c: float = 1.35) -> "Node":
         best, best_score = None, -1e9
         for ch in self.children:
             if ch.visits == 0:
@@ -344,16 +344,16 @@ def rollout_value(s: Snapshot) -> float:
             n = getattr(sp, "num_houses", 0)
             if n == 3:
                 w = COLOR_WEIGHTS.get(getattr(sp, "color_group", None), 1.0)
-                three_house_push += 40 * w
+                three_house_push += 50 * w
     # Slight penalty for low cash (danger of rent)
     cash_pen = 0
     if s.me.money < MIN_CASH_BUFFER:
-        cash_pen = (MIN_CASH_BUFFER - s.me.money) * 0.15
+        cash_pen = (MIN_CASH_BUFFER - s.me.money) * 0.20
     return base + three_house_push - cash_pen + random.uniform(-5, 5)
 
 
 # --- Search driver ----------------------------------------------------------
-def mcts_decide(game: Any, me: Any, iterations: int = 200) -> Action:
+def mcts_decide(game: Any, me: Any, iterations: int = 400) -> Action:
     def _shadow_apply(model: ActionModel, action: Action) -> Snapshot:
         # Return a Snapshot without mutating the real game. A proper clone-based
         # simulator would go here; for safety we just no-op during search.
@@ -413,7 +413,7 @@ class MCTSMonopolyBot:
     def is_ai(self, player: Any) -> bool:
         return isinstance(player.name, str) and player.name.strip().upper().startswith(self.name_prefix.upper())
 
-    def step(self, game: Any, player: Any, iterations: int = 250) -> Dict[str, bool]:
+    def step(self, game: Any, player: Any, iterations: int = 400) -> Dict[str, bool]:
         if not self.is_ai(player):
             return {"want_roll": False, "want_end": False}
 
@@ -459,11 +459,11 @@ class MCTSMonopolyBot:
     def _priority_colors(self):
         # Orange first; then strong middle (pink/red/yellow), then light blue
         return [
-            (255, 165, 0),  # Orange
-            (255, 0, 0),    # Red
-            (255, 255, 0),  # Yellow
-            (255, 0, 255),  # Pink
-            (173, 216, 230) # Light Blue
+            (255, 165, 0),   # Orange
+            (173, 216, 230), # Light Blue
+            (255, 0, 0),     # Red
+            (255, 255, 0),   # Yellow
+            (255, 0, 255),   # Pink
         ]
 
     @staticmethod
@@ -544,7 +544,7 @@ class MCTSMonopolyBot:
 
                 base = int(getattr(target, "cost", 0) or 0)
                 completes = (len(mine) + 1 == len(group))
-                premium = int(round(base * (0.30 if completes else 0.10)))  # +30% if completing, else +10%
+                premium = int(round(base * (0.40 if completes else 0.10)))  # +30% if completing, else +10%
                 offer_cash = min(budget, base + premium)
 
                 if self._cash_after(me, offer_cash) < MIN_CASH_BUFFER:

@@ -5,8 +5,8 @@ from game import Property, Railroad, Utility, Player, Game
 
 class AIMonopolyPropertyManager:
     MAX_DICE_SUM = 12
-    EARLY_GAME_MIN_BUFFER = 200
-    LATE_GAME_MIN_BUFFER  = 400
+    EARLY_GAME_MIN_BUFFER = 180
+    LATE_GAME_MIN_BUFFER  = 350
 
     def __init__(self):
         # Queue of (action, property)
@@ -183,7 +183,7 @@ class AIMonopolyPropertyManager:
         Prefer unmortgaging titles that are part of a completed monopoly first.
         """
         max_rent = self._max_rent_in_play(game, me)
-        keep_after = 200 + max_rent
+        keep_after = 120 + max_rent
 
         # Gather mortgaged titles, preferring monopoly members first.
         monopolies = set()

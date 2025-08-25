@@ -1,0 +1,12 @@
+File: C:\Users\pokem\OneDrive\Desktop\Monopoly_AI_Game\CSV_Files\vs_proxies_300.csv
+n_rows:
+500
+
+winners:
+AI 1: 136 / 500  (27.2%)  95% CI [23.5%, 31.3%]
+Greedy: 132 / 500  (26.4%)  95% CI [22.7%, 30.4%]
+Cautious: 126 / 500  (25.2%)  95% CI [21.6%, 29.2%]
+BuyAll: 106 / 500  (21.2%)  95% CI [17.8%, 25.0%]
+
+turns:
+Median 300.0, IQR [300.0, 300.0]

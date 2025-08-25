@@ -45,7 +45,6 @@ board_center = (board_size//2, board_size//2)
 # --- Global popup delay (ms). You can override at runtime via env or by passing a param to running_display ---
 DEFAULT_POPUP_DELAY_MS = int(os.getenv("POPUP_DELAY_MS", "800"))  # set to "0" for instant
 
-
 # Local helper for rough property value (used in trade AI inside this file)
 def _weighted_title_value(sp):
     t = getattr(sp, "type", "")
@@ -68,6 +67,48 @@ def _weighted_title_value(sp):
         return getattr(sp, "cost", 0) * w
     return getattr(sp, "cost", 0) or 0
 
+def _ai_wants_to_buy(p, prop):
+    from ai_manage import AIMonopolyPropertyManager
+    mgr = AIMonopolyPropertyManager()
+    game = p.board.game
+    needed = mgr._cash_buffer_needed(game, p)   # dynamic, threat-aware buffer:contentReference[oaicite:0]{index=0}
+
+    t = getattr(prop, "type", "")
+    cost = int(getattr(prop, "cost", 0) or 0)
+
+    # Bail early if buying would drop us under buffer by too much
+    # (allow a small overreach margin on great opportunities)
+    OVERREACH = 40
+
+    if t == "Railroad":
+        # Very solid; allow small overreach
+        return (p.money - cost) >= (needed - OVERREACH)
+
+    if t == "Utility":
+        # Low EV; be stricter
+        return (p.money - cost) >= needed
+
+    if t == "Property":
+        mates = [s for s in p.board.spaces
+                 if getattr(s, "type", "") == "Property"
+                 and getattr(s, "color_group", None) == getattr(prop, "color_group", None)]
+        owned = sum(1 for s in mates if getattr(s, "owner", None) is p)
+        completes = (owned + 1) == len(mates)
+        makes_pair = (owned + 1) == 2 and len(mates) > 2
+
+        # Weighted value vs cost (you already defined _weighted_title_value)
+        w = _weighted_title_value(prop) / max(1, cost)
+
+        # Dynamic slack: push harder for high‑EV colors and set synergies
+        slack = 0
+        if completes:   slack += 70
+        elif makes_pair: slack += 40
+        if w >= 1.15:   slack += 30
+        elif w >= 1.08: slack += 15
+
+        return (p.money - cost) >= (needed - slack)
+
+    return False
 
 def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     game = Game(player_names=player_names)
@@ -509,7 +550,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     affordable = info.get("affordable", True)
                     prop = info.get("property")
                     # Conservative default: buy if affordable and leaves ~$100 buffer.
-                    want_buy = bool(affordable and (cur.money - getattr(prop, "cost", 0) >= 100))
+                    want_buy = bool(affordable and _ai_wants_to_buy(p, prop))
                     game.confirm_purchase(want_buy)
                 ai_purchase_started_at = None
 
@@ -599,6 +640,22 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
             if game.pending_bankrupt_notice and ai_bankrupt_started_at is not None and elapsed(ai_bankrupt_started_at):
                 game.pending_bankrupt_notice = None
                 ai_bankrupt_started_at = None
+
+        # ---- AI: proactive property management (safe auto-build/unmortgage/mortgage) ----
+        from ai_manage import AIMonopolyPropertyManager
+        _PM = getattr(game, "_pm", None) or AIMonopolyPropertyManager()
+        game._pm = _PM  # cache once
+
+        if cur and is_ai_player(cur) and not any_modal_open():
+            # Let the manager plan and enqueue one safe build
+            _PM.consider_management(game, cur)
+
+            # If it queued a build, perform exactly one house build now (no modal needed)
+            prop_to_build = _PM.next_build_request(game, cur)
+            if prop_to_build:
+                can_house, _ = prop_to_build.can_build_house(cur, game.board)
+                if can_house:
+                    prop_to_build.build_house(cur)
 
         # --- Click Handling ---
         for event in pygame.event.get():
@@ -1109,7 +1166,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                 game.pending_trade
             )
             if not modals_open:
-                intent = bot.step(game, current_player, iterations=300)
+                intent = bot.step(game, current_player, iterations=600)
                 if intent.get("want_roll") and enable_dice:
                     roll_total, is_doubles = game.dice.roll()
                     has_rolled = True
@@ -1190,7 +1247,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     ai_purchase_started_at = pygame.time.get_ticks()
                 elif elapsed(ai_purchase_started_at):
                     # Heuristic: buy if affordable AND keep a small buffer
-                    want_buy = bool(affordable and (p.money - getattr(prop, "cost", 0) >= 100))
+                    want_buy = bool(affordable and _ai_wants_to_buy(p, prop))
                     game.confirm_purchase(want_buy)
                     ai_purchase_started_at = None
             else:
