@@ -39,6 +39,10 @@ HOUSE_STEP_WEIGHT = [0.0, 1.0, 1.6, 2.2, 1.1, 0.6]  # [base,1,2,3,4,hotel]
 # Safety cash buffer (prefer to keep at least this much liquid)
 MIN_CASH_BUFFER = 200
 
+try:
+    from ai_manage import decide_and_apply_management
+except ImportError:
+    decide_and_apply_management = None
 
 # --- Action representation --------------------------------------------------
 @dataclass(frozen=True)
@@ -235,27 +239,40 @@ class ActionModel:
             return Snapshot(g, me)
 
         if kind == "RAISE_CASH":
-            # Greedy mortgages/sales guided by heuristics: mortgage weakest first
+            # Determine how much we need
             need = 0
             if g.pending_debt and g.pending_debt.get("player") is me:
                 need = max(0, g.pending_debt["amount"] - me.money)
-            # Sort properties to mortgage/sell (utilities first, then low-weight colors)
-            def key(sp):
-                t = getattr(sp, "type", "Property")
-                if t == "Utility": return 0.1
-                if t == "Railroad": return 0.4
-                if t == "Property":
-                    return COLOR_WEIGHTS.get(getattr(sp, "color_group", None), 0.8)
-                return 0.5
-            for sp in sorted(list(me.properties_owned), key=key):
-                if hasattr(sp, "can_mortgage") and sp.can_mortgage(me, g.board)[0]:
-                    sp.mortgage(me)
-                elif hasattr(sp, "can_sell_house") and sp.can_sell_house(me, g.board)[0]:
-                    sp.sell_house(me)
-                elif hasattr(sp, "can_sell_hotel") and sp.can_sell_hotel(me, g.board)[0]:
-                    sp.sell_hotel(me)
-                if need and me.money >= g.pending_debt["amount"]:
+
+            # 1) Mortgage in strict order: Utilities → Railroads → Unimproved Properties
+            from ai_manage import AIMonopolyPropertyManager
+            from game import Property, Railroad, Utility
+            mgr = AIMonopolyPropertyManager()
+            while me.money < g.pending_debt["amount"]:
+                mort_candidates = mgr._non_core_mortgage_candidates(g, me)
+                if not mort_candidates:
                     break
+                _, sp = mort_candidates[0]   # pick the first priority candidate
+                if isinstance(sp, Property):
+                    ok, _ = sp.can_mortgage(me, g.board)
+                    if ok: sp.mortgage(me)
+                elif isinstance(sp, (Railroad, Utility)):
+                    ok, _ = sp.can_mortgage(me)
+                    if ok: sp.mortgage(me)
+
+                if me.money >= g.pending_debt["amount"]:
+                    break
+
+            # 2) As a last resort, sell houses/hotels to raise cash
+            if me.money < g.pending_debt["amount"]:
+                for sp in me.properties_owned:
+                    if hasattr(sp, "can_sell_house") and sp.can_sell_house(me, g.board)[0]:
+                        sp.sell_house(me)
+                    elif hasattr(sp, "can_sell_hotel") and sp.can_sell_hotel(me, g.board)[0]:
+                        sp.sell_hotel(me)
+                    if me.money >= g.pending_debt["amount"]:
+                        break
+
             return Snapshot(g, me)
 
         if kind == "BANKRUPT":
@@ -267,10 +284,13 @@ class ActionModel:
 
         if kind == "JAIL_USE_GOJF":
             g.use_gojf_and_exit(me); return Snapshot(g, me)
+        
         if kind == "JAIL_PAY":
             g.pay_fine_and_exit(me); return Snapshot(g, me)
+        
         if kind == "JAIL_ROLL":
             g.roll_for_doubles_from_jail(me); return Snapshot(g, me)
+        
         if kind == "ACK_GO_TO_JAIL":
             g.pending_jail = None
             me.in_jail = True
@@ -280,24 +300,31 @@ class ActionModel:
 
         if kind == "BUY":
             g.confirm_purchase(True); return Snapshot(g, me)
+       
         if kind == "SKIP_PURCHASE":
             g.confirm_purchase(False); return Snapshot(g, me)
 
         if kind == "PAY_RENT":
             g.settle_rent(); return Snapshot(g, me)
+        
         if kind == "PAY_TAX":
             g.confirm_tax(); return Snapshot(g, me)
 
         if kind == "BUILD_HOUSE":
             g.confirm_build("house"); return Snapshot(g, me)
+        
         if kind == "BUILD_HOTEL":
             g.confirm_build("hotel"); return Snapshot(g, me)
+        
         if kind == "SELL_HOUSE":
             g.confirm_build("sell_house"); return Snapshot(g, me)
+        
         if kind == "SELL_HOTEL":
             g.confirm_build("sell_hotel"); return Snapshot(g, me)
+        
         if kind == "MORTGAGE":
             g.confirm_build("mortgage"); return Snapshot(g, me)
+        
         if kind == "UNMORTGAGE":
             g.confirm_build("unmortgage"); return Snapshot(g, me)
 
@@ -401,6 +428,13 @@ class MCTSMonopolyBot:
            or getattr(game, "pending_trade", None):
             return {"want_roll": False, "want_end": False}
 
+        # Give AI a chance to manage (build/mortgage/unmortgage) when no modal is up
+        if decide_and_apply_management:
+            decide_and_apply_management(game, player)
+            # If management opened a modal (e.g., build/debt), let UI handle it this frame
+            if getattr(game, "pending_build", None) or getattr(game, "pending_debt", None):
+                return {"want_roll": False, "want_end": False}
+
         # Try a smart trade first.
         if self._try_trade(game, player):
             return {"want_roll": False, "want_end": False}
@@ -410,6 +444,13 @@ class MCTSMonopolyBot:
         if actions and (len(actions) > 1 or actions[0].kind != "NOOP"):
             a = mcts_decide(game, player, iterations=iterations)
             model.apply(a)
+
+            # After an auto-action resolves, try one more management sweep
+            if decide_and_apply_management:
+                decide_and_apply_management(game, player)
+                if getattr(game, "pending_build", None) or getattr(game, "pending_debt", None):
+                    return {"want_roll": False, "want_end": False}
+
             return {"want_roll": False, "want_end": False}
 
         return {"want_roll": True, "want_end": False}

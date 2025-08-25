@@ -118,6 +118,7 @@ class Card:
 
         elif self.action_type == "go_to_jail":
             game.pending_jail = {"player": player}
+            player.doubles_rolled_consecutive = 0
             print(f"{player.name} sent to Jail (via card)!")
 
         elif self.action_type == "get_out_of_jail":
@@ -581,6 +582,7 @@ class GoToJailSpace(Space):
         # player.position = board.jail_space_index # Move to Jail space
         # player.jail_turns = 0 # Reset jail turns for entering via card
         board.game.pending_jail = {"player": player}
+        player.doubles_rolled_consecutive = 0
 
 class JailSpace(Space):
     def __init__(self, name: str, index: int):
@@ -763,9 +765,15 @@ class Game:
             self.pending_debt = None
             self.pending_bankrupt_notice = None
 
+    def _is_current_player(self, player):
+        if not self.players:
+            return False
+        return self.players[self.current_player_index % len(self.players)] is player
+
     def declare_bankruptcy(self, debtor, creditor=None):
         """Remove debtor from the game, transfer assets to creditor (or bank)."""
-        # Liquidate buildings to BANK at half price; give proceeds to creditor
+        # 1) Liquidate improvements to the BANK at half price (Monopoly-style),
+        #    add proceeds to debtor (they're about to be zeroed out anyway).
         proceeds = 0
         for sp in list(debtor.properties_owned):
             if isinstance(sp, Property):
@@ -776,21 +784,29 @@ class Game:
                 else:
                     proceeds += (sp.house_cost // 2) * sp.num_houses
                     sp.num_houses = 0
+        if proceeds:
+            debtor.collect_money(proceeds)
 
-            # Transfer title to creditor or back to bank
+        # 2) Titles: give to creditor, or return to bank (unowned)
+        for sp in list(debtor.properties_owned):
             if creditor:
                 sp.owner = creditor
                 creditor.properties_owned.append(sp)
+                # (Keep mortgage state as-is for simplicity)
             else:
                 sp.owner = None
+                # Reset mortgages so the tile is clean for future purchases
+                if hasattr(sp, "is_mortgaged"):
+                    sp.is_mortgaged = False
+
         debtor.properties_owned.clear()
 
-        # Transfer GOJF cards
+        # 3) Transfer GOJF to creditor (if any)
         if creditor and debtor.get_out_of_jail_free_cards > 0:
             creditor.get_out_of_jail_free_cards += debtor.get_out_of_jail_free_cards
         debtor.get_out_of_jail_free_cards = 0
 
-        # Clear any pending items involving debtor
+        # 4) Clear any pending items that referenced the debtor
         if self.pending_rent and (self.pending_rent.get("player") is debtor or self.pending_rent.get("owner") is debtor):
             self.pending_rent = None
         if self.pending_purchase and self.pending_purchase.get("player") is debtor:
@@ -804,24 +820,23 @@ class Game:
         if self.pending_debt and self.pending_debt.get("player") is debtor:
             self.pending_debt = None
 
-        # Remove player from the game (no None placeholders)
+        # 5) Remove player from the roster
         if debtor in self.players:
             self.players.remove(debtor)
-
         else:
-            # Fallback: remove a player that matches by name (helps in simulated states)
+            # Fallback by name if object identity differs
             for p in list(self.players):
                 if getattr(p, "name", None) == getattr(debtor, "name", None):
                     self.players.remove(p)
                     break
 
-        # Show a one-click notice for the UI to acknowledge
+        # 6) UI notice
         self.pending_bankrupt_notice = {
             "debtor": debtor.name,
             "creditor": (creditor.name if creditor else None)
         }
 
-        # Win check
+        # 7) Winner check
         if len(self.players) == 1:
             self.game_over = True
             self.winner = self.players[0]
@@ -1095,10 +1110,14 @@ class Game:
             print(f"  {player.name} could not roll doubles and remains in Jail.")
 
     def start_jail_turn(self, player):
-        """Open the UI modal for jail options."""
+        if not self._is_current_player(player):
+            return
         self.pending_jail_turn = {"player": player}
 
     def use_gojf_and_exit(self, player):
+        if not self._is_current_player(player):
+            return
+        
         if player.get_out_of_jail_free_cards > 0:
             player.get_out_of_jail_free_cards -= 1
             player.in_jail = False
@@ -1107,11 +1126,15 @@ class Game:
             print(f"{player.name} used a Get Out of Jail Free card and is now out of Jail.")
             # roll_sum, _ = self.dice.roll()
             # player.move(roll_sum, self.board)
+        
         else:
             print(f"{player.name} has no Get Out of Jail Free card.")
         self.pending_jail_turn = None
 
     def pay_fine_and_exit(self, player):
+        if not self._is_current_player(player):
+            return
+        
         if player.money >= 50:
             player.pay_money(50)
             player.in_jail = False
@@ -1120,11 +1143,15 @@ class Game:
             print(f"{player.name} paid $50 and is now out of Jail.")
             # roll_sum, _ = self.dice.roll()
             # player.move(roll_sum, self.board)
+        
         else:
             print(f"{player.name} cannot afford to pay $50.")
         self.pending_jail_turn = None
 
     def roll_for_doubles_from_jail(self, player):
+        if not self._is_current_player(player):
+            return
+        
         print(f"  {player.name} attempts to roll for doubles to get out of Jail...")
         player.jail_turns += 1
         roll_sum, is_double = self.dice.roll()
@@ -1133,6 +1160,7 @@ class Game:
             player.jail_turns = 0
             print(f"  {player.name} rolled doubles and is now out of Jail!")
             player.move(roll_sum, self.board)
+        
         elif player.jail_turns >= 3:
             print(f"  {player.name} could not roll doubles on 3rd attempt. Must pay $50.")
             if player.money >= 50:
@@ -1147,6 +1175,7 @@ class Game:
                 # if len(self.players) == 1:
                 #     self.game_over = True
                 #     print(f"\n--- Game Over! {self.players[0].name} is the winner! ---")
+        
         else:
             print(f"  {player.name} could not roll doubles and remains in Jail.")
         self.pending_jail_turn = None

@@ -110,41 +110,69 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
             draw_round(round_rows)
             pygame.time.delay(1000)  # delay between each player's roll
 
-        # Break ties for FIRST place only (keep re-rolling tied-top until unique)
-        def break_top_tie():
+        # Break ties *within each score group only* so rerolls don't change cross-group order.
+        # We keep each group's base score and add a tiny epsilon to preserve group ranking globally.
+        def break_local_ties():
             nonlocal roll_sum
-            while True:
-                top = max(roll_sum.values())
-                tied = [p for p, s in roll_sum.items() if s == top]
-                if len(tied) <= 1:
-                    return
-                # re-roll only the players tied for top; show mini sequence
-                mini_rows = []
-                draw_round(round_rows, "Tie! Re-rolling tied players…")
-                pygame.time.delay(900)
-                for p in tied:
-                    s, _ = game.dice.roll()
-                    roll_sum[p] = s
-                    mini_rows.append((p.name, s))
-                    # show the re-rolls right in the center (fresh view)
-                    screen.fill((255, 255, 255))
-                    header = value_font.render("Tie-break rolls…", True, (0, 0, 0))
-                    screen.blit(header, (screen_width//2 - header.get_width() // 2,
-                                         screen_height//2 - 120))
-                    y = -60
-                    for name, s2 in mini_rows:
-                        line = value_font.render(f"{name} rolled {s2}", True, (0, 0, 0))
-                        screen.blit(line, (screen_width//2 - line.get_width() // 2,
-                                           screen_height//2 + y))
-                        y += 36
-                    pygame.display.flip()
-                    pygame.time.delay(900)
 
-        break_top_tie()
+            # Group by the original integer roll result
+            score_to_players = {}
+            for p, s in roll_sum.items():
+                base = int(s)
+                score_to_players.setdefault(base, []).append(p)
+
+            # Process from highest base score to lowest so higher groups keep their precedence
+            for base_score in sorted(score_to_players.keys(), reverse=True):
+                group = score_to_players[base_score]
+                if len(group) <= 1:
+                    continue  # nothing to break here
+
+                # Keep rolling this group's players until their *within-group* results are unique
+                while True:
+                    # UI hint
+                    draw_round(round_rows, f"Tie at {base_score}. Re-rolling tied players…")
+                    pygame.time.delay(1000)
+
+                    new_vals = {}
+                    mini_rows = []
+                    for p in group:
+                        s_new, _ = game.dice.roll()
+                        new_vals[p] = s_new
+                        mini_rows.append((p.name, s_new))
+
+                        # Show *this player's* roll immediately
+                        screen.fill((255, 255, 255))
+                        header = value_font.render("Tie-break rolls…", True, (0, 0, 0))
+                        screen.blit(header, (screen_width//2 - header.get_width() // 2,
+                                            screen_height//2 - 120))
+                        y = -60
+                        for name, s2 in mini_rows:
+                            line = value_font.render(f"{name} rolled {s2}", True, (0, 0, 0))
+                            screen.blit(line, (screen_width//2 - line.get_width() // 2,
+                                            screen_height//2 + y))
+                            y += 36
+                        pygame.display.flip()
+                        pygame.time.delay(1000)  # delay between each tied player’s roll
+
+                    # Check uniqueness within this group
+                    counts = {}
+                    for v in new_vals.values():
+                        counts[v] = counts.get(v, 0) + 1
+                    if all(c == 1 for c in counts.values()):
+                        # Unique — assign tiny eps to fix their relative order inside this base band
+                        ordered_group = sorted(group, key=lambda p: new_vals[p], reverse=True)
+                        n = len(ordered_group)
+                        for rank, p in enumerate(ordered_group):
+                            eps = (n - rank) / 100.0
+                            roll_sum[p] = base_score + eps
+                        break  # resolved this group; move to next
+                    # else: loop again until unique
+
+        break_local_ties()
 
         # Build final turn order: sort by roll_sum desc, stable for non-top ties
         ordered_players = sorted(players_in_order, key=lambda p: roll_sum[p], reverse=True)
-        ordered_rows = [(p.name, roll_sum[p]) for p in ordered_players]
+        ordered_rows = [(p.name, int(roll_sum[p])) for p in ordered_players]
 
         # Show final order centered
         screen.fill((255, 255, 255))
@@ -176,6 +204,9 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     running = True
     rolled = None
     space_rects = {}
+    trade_rect = {}
+    manage_rect = {}
+    end_rect = {}
 
     # --- AI Timers ---
     ai_jail_notice_started_at = None
@@ -186,6 +217,9 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     ai_card_started_at = None
     ai_purchase_started_at = None
     ai_trade_started_at = None
+    ai_tax_started_at = None
+    ai_build_started_at = None
+    ai_debt_started_at = None
 
     # --- Human timers  ---
     human_card_started_at = None
@@ -196,6 +230,7 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
     human_jail_turn_started_at = None
     human_bankrupt_started_at = None
     human_trade_started_at = None
+    human_debt_started_at = None
 
     def elapsed(start):
         return start is not None and (pygame.time.get_ticks() - start) >= AUTO_DELAY_MS
@@ -241,6 +276,8 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
         ai_purchase_started_at = None
         ai_jail_notice_started_at = ai_jail_turn_started_at = None
         ai_rent_started_at = ai_tax_started_at = ai_bankrupt_started_at = None
+        ai_build_started_at = None
+        ai_debt_started_at = None
 
         human_card_started_at = human_purchase_started_at = None
         human_rent_started_at = human_tax_started_at = None
@@ -417,6 +454,16 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                 if human_trade_started_at is None:
                     human_trade_started_at = now
 
+        # Debt
+        if game.pending_debt:
+            p = game.pending_debt.get("player")
+            if p and is_ai_player(p):
+                if ai_debt_started_at is None:
+                    ai_debt_started_at = now
+            else:
+                if human_debt_started_at is None:
+                    human_debt_started_at = now
+
         # === Auto-resolve AI popups AFTER the minimum read delay =========
         if cur and is_ai_player(cur):
             # 1) Chance / Community Chest card
@@ -466,7 +513,89 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
                     game.confirm_purchase(want_buy)
                 ai_purchase_started_at = None
 
-            # 6) Bankrupt notice (close after delay so it's readable)
+            # 6) Debt (raise cash in priority, then pay or bankrupt)
+            if game.pending_debt and ai_debt_started_at is not None and elapsed(ai_debt_started_at):
+                info = game.pending_debt
+                p = info.get("player")
+                if p is cur:
+                    amt  = int(info.get("amount", 0))
+                    cred = info.get("creditor")
+
+                    # If we already can pay, do it.
+                    if p.money >= amt:
+                        p.pay_money(amt)
+                        if cred: cred.collect_money(amt)
+                        game.clear_debt()
+                        ai_debt_started_at = None
+                    else:
+                        from ai_manage import AIMonopolyPropertyManager
+                        from game import Property, Railroad, Utility
+                        mgr = AIMonopolyPropertyManager()
+
+                        progressed = True
+                        # 1) Utilities/Railroads/Unimproved properties (strict order via manager)
+                        while p.money < amt and progressed:
+                            progressed = False
+                            cands = mgr._non_core_mortgage_candidates(game, p)  # utilities/railroads first, then loose, then unimproved-in-monopoly
+                            for _, sp in cands:
+                                if p.money >= amt:
+                                    break
+                                if isinstance(sp, Property):
+                                    ok, _ = sp.can_mortgage(p, game.board)
+                                    if ok:
+                                        sp.mortgage(p)
+                                        progressed = True
+                                elif isinstance(sp, (Railroad, Utility)):
+                                    ok, _ = sp.can_mortgage(p)
+                                    if ok:
+                                        sp.mortgage(p)
+                                        progressed = True
+
+                        # 2) Last resort: sell houses/hotels (keeps even‑selling via can_* rules)
+                        if p.money < amt:
+                            # Try houses first, then hotels (or vice versa—both are "fourth" tier).
+                            # We loop until we either reach amt or can’t sell any further.
+                            changed = True
+                            while p.money < amt and changed:
+                                changed = False
+                                # Sell one house if allowed anywhere
+                                for sp in list(p.properties_owned):
+                                    if hasattr(sp, "can_sell_house") and sp.can_sell_house(p, game.board)[0]:
+                                        sp.sell_house(p)
+                                        changed = True
+                                        if p.money >= amt: break
+                                if p.money >= amt: break
+                                # Then try hotels
+                                for sp in list(p.properties_owned):
+                                    if hasattr(sp, "can_sell_hotel") and sp.can_sell_hotel(p, game.board)[0]:
+                                        sp.sell_hotel(p)
+                                        changed = True
+                                        if p.money >= amt: break
+
+                        # Pay if we made it; else bankrupt
+                        if p.money >= amt:
+                            p.pay_money(amt)
+                            if cred: cred.collect_money(amt)
+                            game.clear_debt()
+                        else:
+                            # Remove debtor, transfer assets, and show the standard notice
+                            debtor = p
+                            was_current = (game.players and game.players[player_idx] is debtor)
+                            game.declare_bankruptcy(debtor, cred)
+                            game.clear_debt()
+                            # If the AI disappeared and it was their turn, start next player cleanly
+                            if was_current and not game.game_over:
+                                rolled = None
+                                is_doubles = False
+                                has_rolled = False
+                                if 0 <= player_idx < len(game.players):
+                                    nxt = game.players[player_idx]
+                                    if nxt.in_jail and not game.pending_jail_turn:
+                                        game.start_jail_turn(nxt)
+
+                        ai_debt_started_at = None
+
+            # 7) Bankrupt notice (close after delay so it's readable)
             if game.pending_bankrupt_notice and ai_bankrupt_started_at is not None and elapsed(ai_bankrupt_started_at):
                 game.pending_bankrupt_notice = None
                 ai_bankrupt_started_at = None
@@ -954,10 +1083,21 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
         space_rects = board_game(screen, text_font, board_size, corner_size, space_size)
         draw_mortgage_badges(screen, game, space_rects)
 
-        game.current_player_index = player_idx
+        # --- SAFETY: players list may have changed this frame (e.g., bankruptcy) ---
+        if not game.players:
+            # No one left; end safely (Game.declare_bankruptcy should normally set game_over/winner)
+            running = False
+            pygame.display.flip()
+            break  # or 'return' if you prefer exiting the function
+
+        if player_idx >= len(game.players):
+            # Clamp to the new list length (wrap to 0 is fine for turn order)
+            player_idx %= len(game.players)
+
+        # game.current_player_index = player_idx
         current_player = game.players[player_idx]
 
-        enable_dice = ((not has_rolled or is_doubles) and not current_player.in_jail)
+        enable_dice = ((not has_rolled or is_doubles) and not current_player.in_jail and not game.game_over)
 
         # --- AI driver: let the bot act automatically (when it’s an AI’s turn) ---
         if bot.is_ai(current_player):
@@ -979,8 +1119,6 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
             # End turn automatically if allowed
             if (has_rolled and (not is_doubles) and not (game.pending_build or game.pending_rent or game.pending_purchase or game.last_drawn_card or game.pending_debt or game.pending_jail_turn or game.pending_bankrupt_notice or game.pending_trade)):
                 advance_to_next()
-
-        enable_dice = ((not has_rolled or is_doubles) and not current_player.in_jail)
 
         # Make interactable buttons
         dice.make_dice_button(screen, circ_color, circ_center, circ_rad, enable=enable_dice)
@@ -1074,6 +1212,22 @@ def running_display(player_names: list[str], popup_delay_ms: int | None = None):
 
         elif game.pending_build:
             draw_build_modal(screen, game, value_font, text_font, board_center[0], board_center[1])
+
+            # Auto-resolve for AI after the same read delay pattern as other popups
+            info = game.pending_build
+            p = info.get("player")
+            if p and is_ai_player(p):
+                if ai_build_started_at is None:
+                    ai_build_started_at = pygame.time.get_ticks()
+                elif elapsed(ai_build_started_at):
+                    # prefer house -> hotel -> else skip
+                    if info.get("can_house"):
+                        game.confirm_build("house")
+                    elif info.get("can_hotel"):
+                        game.confirm_build("hotel")
+                    else:
+                        game.confirm_build("skip")
+                    ai_build_started_at = None
 
         elif game.pending_tax:
             tp = game.pending_tax.get("player")
@@ -1288,6 +1442,6 @@ if __name__ == "__main__":
     #     # fallback: old flow where only number was returned
     #     player_names = [f"Player {i+1}" for i in range(int(names_or_count))]
 
-    player_names = ["AI 1", "Troy", "Thomas", "Tenzin"]
-    # player_names = ["AI 1", "AI 2", "AI 3", "AI 4"]
-    running_display(player_names, popup_delay_ms=500)
+    # player_names = ["AI 1", "Troy", "Thomas", "Tenzin"]
+    player_names = ["AI 1", "AI 2", "AI 3", "AI 4"]
+    running_display(player_names, popup_delay_ms=0)
